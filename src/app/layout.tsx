@@ -25,9 +25,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased font-mono h-full bg-background text-foreground`}>
-        {children}
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased font-mono h-full bg-background text-foreground flex flex-col`}>
+        <div className="flex-grow flex flex-col">
+          {children}
+        </div>
         <Toaster />
+        <footer className="py-3 text-center text-xs text-muted-foreground">
+          Made by <a href="https://alosiousbenny.vercel.app/" target="_blank" rel="noopener noreferrer" className="underline hover:text-accent">Aloisious Benny</a>
+        </footer>
       </body>
     </html>
   );

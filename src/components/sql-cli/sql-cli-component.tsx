@@ -153,9 +153,10 @@ export function SqlCliComponent() {
         }
         break;
       case 'SHOW':
-        if (args[0]?.toUpperCase() === 'DATABASES') {
+        const showArg = args[0]?.replace(/;/g, '').toUpperCase();
+        if (showArg === 'DATABASES') {
           addHistoryEntry('output', handleShowDatabases(databases));
-        } else if (args[0]?.toUpperCase() === 'TABLES') {
+        } else if (showArg === 'TABLES') {
            addHistoryEntry('output', handleShowTables(currentDatabase, databases));
         } else {
           addHistoryEntry('error', "Error: Unknown SHOW command. Try SHOW DATABASES; or SHOW TABLES;");

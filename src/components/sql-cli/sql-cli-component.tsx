@@ -23,7 +23,8 @@ import {
   handleDropTable,
   handleDropDatabase,
   handleUpdateData,
-  handleDeleteData
+  handleDeleteData,
+  handleAlterTableAddColumn
 } from './utils';
 
 // Client-side UI state keys for localStorage
@@ -157,6 +158,7 @@ export function SqlCliComponent() {
 
       const { commandName, args } = parseCommand(commandStr);
       let result: { newDatabases?: DatabasesStructure; newCurrentDb?: string | null; output: string | string[] };
+      let needsSave = false;
 
       if (commandStr.toUpperCase().startsWith('ASSIST ')) {
         const match = commandStr.match(/^ASSIST\s+"([^"]+)"\s*;?$/i) || commandStr.match(/^ASSIST\s+'([^']+)'\s*;?$/i);
@@ -179,7 +181,6 @@ export function SqlCliComponent() {
         }
       }
       
-      let needsSave = false;
       switch (commandName) {
         case 'CREATE':
           if (args[0]?.toUpperCase() === 'DATABASE' && args[1]) {
@@ -238,11 +239,11 @@ export function SqlCliComponent() {
             tempDatabases = result.newDatabases;
             needsSave = !(typeof result.output === 'string' && result.output.startsWith('Error:'));
           }
-          addHistoryEntry(typeof result.output === 'string' && result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          addHistoryEntry((typeof result.output === 'string' && result.output.startsWith('Error:')) ? 'error' : 'output', result.output);
           break;
         case 'SELECT':
           result = handleSelectData(commandStr, currentDatabase, tempDatabases);
-           addHistoryEntry( (typeof result.output === 'string' && result.output.startsWith('Error:')) ? 'error' : 'output', result.output);
+          addHistoryEntry( (typeof result.output === 'string' && result.output.startsWith('Error:')) ? 'error' : 'output', result.output);
           break;
         case 'DROP':
           if (args[0]?.toUpperCase() === 'TABLE' && args[1]) {
@@ -258,7 +259,7 @@ export function SqlCliComponent() {
             result = handleDropDatabase(dbNameToDrop, currentDatabase, tempDatabases);
             if (result.newDatabases) {
               tempDatabases = result.newDatabases;
-              if (result.newCurrentDb !== undefined) { // Can be null
+              if (result.newCurrentDb !== undefined) { 
                 setCurrentDatabase(result.newCurrentDb);
               }
               needsSave = !result.output.startsWith('Error:');
@@ -288,6 +289,18 @@ export function SqlCliComponent() {
              addHistoryEntry('error', `Error: Invalid DELETE syntax. Expected: DELETE FROM <table_name> ...;`);
            }
           break;
+        case 'ALTER':
+            if (args[0]?.toUpperCase() === 'TABLE' && args[2]?.toUpperCase() === 'ADD' && args[3]?.toUpperCase() === 'COLUMN') {
+                result = handleAlterTableAddColumn(args, currentDatabase, tempDatabases);
+                if (result.newDatabases) {
+                    tempDatabases = result.newDatabases;
+                    needsSave = !result.output.startsWith('Error:');
+                }
+                addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+            } else {
+                addHistoryEntry('error', `Error: Unsupported ALTER command. Try ALTER TABLE <name> ADD COLUMN <col_name> <col_type>;`);
+            }
+            break;
         case 'CLEAR':
           setHistory([]);
            addHistoryEntry('output', [ 
@@ -308,9 +321,12 @@ export function SqlCliComponent() {
             "    Example: CREATE TABLE users (id INT, name VARCHAR(100));",
             "  SHOW TABLES;",
             "  DESCRIBE <table_name>; (or DESC <table_name>;)",
+            "  ALTER TABLE <table_name> ADD COLUMN <col_name> <col_type_def>;",
+            "    Example: ALTER TABLE users ADD COLUMN email VARCHAR(255);",
             "  DROP TABLE <table_name>;",
             "  INSERT INTO <table_name> [(col1, ...)] VALUES (val1, ...);",
-            "  SELECT <columns | *> FROM <table_name> [WHERE col = value];",
+            "  SELECT <columns | *> FROM <table_name> [WHERE cond] [ORDER BY col [ASC|DESC]] [LIMIT num];",
+            "    Example: SELECT name, age FROM users WHERE city = 'New York' ORDER BY age DESC LIMIT 10;",
             "  UPDATE <table_name> SET col1 = val1, ... [WHERE condition];",
             "  DELETE FROM <table_name> [WHERE condition];",
             "  ASSIST \"<your_sql_question>\"; -- Get AI syntax help",
@@ -318,6 +334,7 @@ export function SqlCliComponent() {
             "  HELP; -- Show this help message",
             "  -- <your_comment> -- Add a comment (ignored by SQL engine)",
             "Note: Multiple commands can be entered on one line, separated by semicolons.",
+            "       Semicolons in string literals with multiple commands on one line may not parse correctly.",
             "Database data is saved on the server (simulated via JSON file).",
           ]);
           break;
@@ -332,7 +349,7 @@ export function SqlCliComponent() {
       }
     }
     if (JSON.stringify(databases) !== JSON.stringify(tempDatabases)) {
-        setDatabases(tempDatabases);
+        setDatabases(tempDatabases); // Ensure client state reflects the final state if no save was triggered for the last command
     }
   };
 
@@ -429,4 +446,3 @@ export function SqlCliComponent() {
     </div>
   );
 }
-

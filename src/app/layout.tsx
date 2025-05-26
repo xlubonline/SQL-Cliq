@@ -31,7 +31,7 @@ export default function RootLayout({
         </div>
         <Toaster />
         <footer className="py-3 text-center text-xs text-muted-foreground">
-          Made by <a href="https://alosiousbenny.vercel.app/" target="_blank" rel="noopener noreferrer" className="underline hover:text-accent">Aloisious Benny</a>
+          Made by <a href="https://alosiousbenny.vercel.app/" target="_blank" rel="noopener noreferrer" className="underline hover:text-accent">Alosious Benny</a>
         </footer>
       </body>
     </html>

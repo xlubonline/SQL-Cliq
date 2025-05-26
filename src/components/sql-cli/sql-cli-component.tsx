@@ -69,6 +69,7 @@ export function SqlCliComponent() {
           "Type 'HELP;' for a list of basic commands.",
         ]);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [toast]); // addHistoryEntry is not stable, so not including it here
 
   // Save state to localStorage
@@ -109,133 +110,142 @@ export function SqlCliComponent() {
     setHistory(prev => [...prev, { id: Date.now().toString() + Math.random(), type, content, prompt: currentPrompt }]);
   }, []);
 
-  const processCommand = async (commandStr: string) => {
-    const trimmedCommand = commandStr.trim();
-    if (!trimmedCommand) return;
+  const processCommand = async (fullInputLine: string) => {
+    const trimmedFullInputLine = fullInputLine.trim();
+    if (!trimmedFullInputLine) return;
 
     const currentPrompt = `${currentDatabase ? `${currentDatabase}>` : 'sql-cliq>'}`;
     
-    if (trimmedCommand.startsWith('--')) {
-      addHistoryEntry('comment', trimmedCommand, currentPrompt);
+    if (trimmedFullInputLine.startsWith('--')) {
+      addHistoryEntry('comment', trimmedFullInputLine, currentPrompt);
       return;
     }
     
-    addHistoryEntry('input', trimmedCommand, currentPrompt);
+    addHistoryEntry('input', trimmedFullInputLine, currentPrompt);
 
-    const { commandName, args } = parseCommand(trimmedCommand);
-    let result: { newDatabases?: DatabasesStructure; newCurrentDb?: string | null; output: string | string[] };
+    const individualCommandStrings = trimmedFullInputLine
+      .split(';')
+      .map(cmd => cmd.trim())
+      .filter(cmd => cmd.length > 0);
 
-    if (trimmedCommand.toUpperCase().startsWith('ASSIST ')) {
-      const match = trimmedCommand.match(/^ASSIST\s+"([^"]+)"\s*;?$/i) || trimmedCommand.match(/^ASSIST\s+'([^']+)'\s*;?$/i);
-      if (match && match[1]) {
-        setIsLoadingAssistant(true);
-        addHistoryEntry('assist-input', `AI Assistant Request: ${match[1]}`);
-        try {
-          const aiResponse = await getSqlCommand({ prompt: match[1] });
-          addHistoryEntry('assist-output', `AI Suggestion:\n${aiResponse.sqlCommand}`);
-        } catch (error) {
-          console.error("AI Assistant error:", error);
-          addHistoryEntry('error', "Error: AI Assistant failed to respond.");
-        } finally {
-          setIsLoadingAssistant(false);
+    for (const commandStr of individualCommandStrings) {
+      if (isLoadingAssistant) continue; // Skip if AI is already working from a previous command in the batch
+
+      const { commandName, args } = parseCommand(commandStr);
+      let result: { newDatabases?: DatabasesStructure; newCurrentDb?: string | null; output: string | string[] };
+
+      if (commandStr.toUpperCase().startsWith('ASSIST ')) {
+        const match = commandStr.match(/^ASSIST\s+"([^"]+)"\s*;?$/i) || commandStr.match(/^ASSIST\s+'([^']+)'\s*;?$/i);
+        if (match && match[1]) {
+          setIsLoadingAssistant(true);
+          addHistoryEntry('assist-input', `AI Assistant Request: ${match[1]}`);
+          try {
+            const aiResponse = await getSqlCommand({ prompt: match[1] });
+            addHistoryEntry('assist-output', `AI Suggestion:\n${aiResponse.sqlCommand}`);
+          } catch (error) {
+            console.error("AI Assistant error:", error);
+            addHistoryEntry('error', "Error: AI Assistant failed to respond.");
+          } finally {
+            setIsLoadingAssistant(false);
+          }
+          continue; // Move to next command in batch if any
+        } else {
+          addHistoryEntry('error', "Error: Invalid ASSIST syntax. Expected: ASSIST \"your question about SQL\".");
+          continue; 
         }
-        return;
-      } else {
-        addHistoryEntry('error', "Error: Invalid ASSIST syntax. Expected: ASSIST \"your question about SQL\".");
-        return;
       }
-    }
-    
-    switch (commandName) {
-      case 'CREATE':
-        if (args[0]?.toUpperCase() === 'DATABASE' && args[1]) {
-          const dbName = args[1].replace(/;/g, '');
-          result = handleCreateDatabase(dbName, databases);
-          if (result.newDatabases) setDatabases(result.newDatabases);
+      
+      switch (commandName) {
+        case 'CREATE':
+          if (args[0]?.toUpperCase() === 'DATABASE' && args[1]) {
+            const dbName = args[1].replace(/;/g, '');
+            result = handleCreateDatabase(dbName, databases);
+            if (result.newDatabases) setDatabases(result.newDatabases);
+            addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          } else if (args[0]?.toUpperCase() === 'TABLE' && args[1]) {
+             result = handleCreateTable(commandStr, currentDatabase, databases);
+             if (result.newDatabases) setDatabases(result.newDatabases);
+             addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          } else {
+            addHistoryEntry('error', `Error: Unknown CREATE command in '${commandStr}'. Try CREATE DATABASE <name>; or CREATE TABLE <name> (...);`);
+          }
+          break;
+        case 'SHOW':
+          const showArg = args[0]?.replace(/;/g, '').toUpperCase();
+          if (showArg === 'DATABASES') {
+            addHistoryEntry('output', handleShowDatabases(databases));
+          } else if (showArg === 'TABLES') {
+             addHistoryEntry('output', handleShowTables(currentDatabase, databases));
+          } else {
+            addHistoryEntry('error', `Error: Unknown SHOW command in '${commandStr}'. Try SHOW DATABASES; or SHOW TABLES;`);
+          }
+          break;
+        case 'USE':
+          if (args[0]) {
+            const dbName = args[0].replace(/;/g, '');
+            result = handleUseDatabase(dbName, databases);
+            if (result.newCurrentDb !== undefined) setCurrentDatabase(result.newCurrentDb); // Allow setting to null
+            addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          } else {
+            addHistoryEntry('error', `Error: Missing database name for USE command in '${commandStr}'.`);
+          }
+          break;
+        case 'DESCRIBE':
+        case 'DESC':
+          if (args[0]) {
+            const tableName = args[0].replace(/;/g, '');
+            addHistoryEntry('output', handleDescribeTable(tableName, currentDatabase, databases));
+          } else {
+            addHistoryEntry('error', `Error: Missing table name for DESCRIBE command in '${commandStr}'.`);
+          }
+          break;
+        case 'INSERT':
+          result = handleInsertData(commandStr, currentDatabase, databases);
           addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
-        } else if (args[0]?.toUpperCase() === 'TABLE' && args[1]) {
-           result = handleCreateTable(trimmedCommand, currentDatabase, databases);
-           if (result.newDatabases) setDatabases(result.newDatabases);
-           addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
-        } else {
-          addHistoryEntry('error', `Error: Unknown CREATE command. Try CREATE DATABASE <name>; or CREATE TABLE <name> (...);`);
-        }
-        break;
-      case 'SHOW':
-        const showArg = args[0]?.replace(/;/g, '').toUpperCase();
-        if (showArg === 'DATABASES') {
-          addHistoryEntry('output', handleShowDatabases(databases));
-        } else if (showArg === 'TABLES') {
-           addHistoryEntry('output', handleShowTables(currentDatabase, databases));
-        } else {
-          addHistoryEntry('error', "Error: Unknown SHOW command. Try SHOW DATABASES; or SHOW TABLES;");
-        }
-        break;
-      case 'USE':
-        if (args[0]) {
-          const dbName = args[0].replace(/;/g, '');
-          result = handleUseDatabase(dbName, databases);
-          if (result.newCurrentDb !== undefined) setCurrentDatabase(result.newCurrentDb); // Allow setting to null
+          break;
+        case 'SELECT':
+          result = handleSelectData(commandStr, currentDatabase, databases);
           addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
-        } else {
-          addHistoryEntry('error', "Error: Missing database name for USE command.");
-        }
-        break;
-      case 'DESCRIBE':
-      case 'DESC':
-        if (args[0]) {
-          const tableName = args[0].replace(/;/g, '');
-          addHistoryEntry('output', handleDescribeTable(tableName, currentDatabase, databases));
-        } else {
-          addHistoryEntry('error', "Error: Missing table name for DESCRIBE command.");
-        }
-        break;
-      case 'INSERT':
-        result = handleInsertData(trimmedCommand, currentDatabase, databases);
-        addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
-        break;
-      case 'SELECT':
-        result = handleSelectData(trimmedCommand, currentDatabase, databases);
-        addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
-        break;
-      case 'CLEAR':
-        setHistory([]);
-        // Optionally, add a cleared message, or leave it blank
-        addHistoryEntry('output', "Terminal cleared.");
-        break;
-      case 'HELP':
-      case 'HELP;':
-        addHistoryEntry('output', [
-          "Available Commands:",
-          "  CREATE DATABASE <db_name>;",
-          "  SHOW DATABASES;",
-          "  USE <db_name>;",
-          "  CREATE TABLE <table_name> (col1_def, col2_def, ...);",
-          "    Example: CREATE TABLE users (id INT, name VARCHAR(100));",
-          "  SHOW TABLES;",
-          "  DESCRIBE <table_name>; (or DESC <table_name>;)",
-          "  INSERT INTO <table_name> VALUES (...); -- (Acknowledged, no data storage yet)",
-          "  SELECT <columns> FROM <table_name>; -- (Acknowledged, no data retrieval yet)",
-          "  ASSIST \"<your_sql_question>\"; -- Get AI syntax help",
-          "  CLEAR; -- Clear the terminal",
-          "  HELP; -- Show this help message",
-          "  -- <your_comment> -- Add a comment (ignored by SQL engine)",
-        ]);
-        break;
-      default:
-        addHistoryEntry('error', `Error: Unknown command '${commandName}'. Type HELP; for a list of commands.`);
+          break;
+        case 'CLEAR':
+          setHistory([]);
+          addHistoryEntry('output', "Terminal cleared.");
+          break;
+        case 'HELP':
+          addHistoryEntry('output', [
+            "Available Commands:",
+            "  CREATE DATABASE <db_name>;",
+            "  SHOW DATABASES;",
+            "  USE <db_name>;",
+            "  CREATE TABLE <table_name> (col1_def, col2_def, ...);",
+            "    Example: CREATE TABLE users (id INT, name VARCHAR(100));",
+            "  SHOW TABLES;",
+            "  DESCRIBE <table_name>; (or DESC <table_name>;)",
+            "  INSERT INTO <table_name> VALUES (...);",
+            "  SELECT <columns> FROM <table_name>;",
+            "  ASSIST \"<your_sql_question>\"; -- Get AI syntax help",
+            "  CLEAR; -- Clear the terminal",
+            "  HELP; -- Show this help message",
+            "  -- <your_comment> -- Add a comment (ignored by SQL engine)",
+            "Note: Multiple commands can be entered on one line, separated by semicolons.",
+          ]);
+          break;
+        default:
+          if (commandStr) { // Check if commandStr is not empty (e.g. from excessive semicolons)
+             addHistoryEntry('error', `Error: Unknown command '${commandName}' in '${commandStr}'. Type HELP; for a list of commands.`);
+          }
+      }
     }
   };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (isLoadingAssistant) return; // Don't process while AI is working
+    if (isLoadingAssistant) return; 
     processCommand(inputValue);
     setInputValue('');
   };
 
   if (!isMounted) {
-    // Prevents flash of unstyled/empty content or localStorage hydration issues
     return (
       <div className="flex flex-col h-full items-center justify-center bg-background p-4">
         <Terminal className="h-16 w-16 text-accent animate-pulse" />
@@ -257,17 +267,17 @@ export function SqlCliComponent() {
             <div key={entry.id} className={`mb-1.5 ${
                 entry.type === 'error' ? 'text-destructive' 
                 : entry.type === 'assist-output' ? 'text-accent' 
-                : entry.type === 'comment' ? 'text-muted-foreground/80' // Style for comments
+                : entry.type === 'comment' ? 'text-muted-foreground/80'
                 : 'text-foreground/90'
             }`}>
-              {(entry.type === 'input' || entry.type === 'comment') && ( // Also show prompt for comments
+              {(entry.type === 'input' || entry.type === 'comment') && (
                 <div className="flex">
                   <span className="text-accent mr-1">{entry.prompt}</span>
                   <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>
                 </div>
               )}
               {(entry.type === 'output' || entry.type === 'error' || entry.type === 'assist-input' || entry.type === 'assist-output') && 
-               entry.type !== 'comment' && // Ensure comments are not re-rendered here
+               entry.type !== 'comment' &&
               (
                 Array.isArray(entry.content) ? 
                   entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{line}</pre>) :

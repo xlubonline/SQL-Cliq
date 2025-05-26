@@ -240,13 +240,13 @@ export function SqlCliComponent() {
           result = handleInsertData(commandStr, currentDatabase, tempDatabases);
           if (result.newDatabases) {
             tempDatabases = result.newDatabases;
-            needsSave = !result.output.startsWith('Error:');
+            needsSave = !(typeof result.output === 'string' && result.output.startsWith('Error:'));
           }
-          addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          addHistoryEntry(typeof result.output === 'string' && result.output.startsWith('Error:') ? 'error' : 'output', result.output);
           break;
         case 'SELECT':
           result = handleSelectData(commandStr, currentDatabase, tempDatabases);
-          addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          addHistoryEntry(typeof result.output === 'string' && result.output.startsWith('Error:') ? 'error' : 'output', result.output);
           break;
         case 'CLEAR':
           setHistory([]);

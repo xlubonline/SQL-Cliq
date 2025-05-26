@@ -1,0 +1,40 @@
+{
+  "student": {
+    "tables": {
+      "EMPLOYEE": {
+        "columnsDefinition": "empId INTEGER PRIMARY KEY,   name TEXT NOT NULL,   dept TEXT NOT NULL",
+        "parsedColumns": [
+          {
+            "name": "empId",
+            "type": "INTEGER PRIMARY KEY"
+          },
+          {
+            "name": "name",
+            "type": "TEXT NOT NULL"
+          },
+          {
+            "name": "dept",
+            "type": "TEXT NOT NULL"
+          }
+        ],
+        "data": [
+          {
+            "empId": 1,
+            "name": "Clark",
+            "dept": "Sales"
+          },
+          {
+            "empId": 2,
+            "name": "Dave",
+            "dept": "Accounting"
+          },
+          {
+            "empId": 3,
+            "name": "Ava",
+            "dept": "Sales"
+          }
+        ]
+      }
+    }
+  }
+}

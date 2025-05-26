@@ -14,7 +14,7 @@ export interface DatabasesStructure {
 
 export interface HistoryEntry {
   id: string;
-  type: 'input' | 'output' | 'error' | 'assist-input' | 'assist-output';
+  type: 'input' | 'output' | 'error' | 'assist-input' | 'assist-output' | 'comment';
   content: string | string[]; // string[] for multi-line output like SHOW TABLES
   prompt?: string; // For input entries, store the prompt used
 }

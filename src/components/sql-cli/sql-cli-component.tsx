@@ -66,7 +66,7 @@ export function SqlCliComponent() {
           "Type 'HELP;' for a list of basic commands.",
         ]);
     }
-  }, [toast]);
+  }, [toast]); // addHistoryEntry is not stable, so not including it here
 
   // Save state to localStorage
   useEffect(() => {
@@ -111,6 +111,12 @@ export function SqlCliComponent() {
     if (!trimmedCommand) return;
 
     const currentPrompt = `${currentDatabase ? `${currentDatabase}>` : 'sql-cliq>'}`;
+    
+    if (trimmedCommand.startsWith('--')) {
+      addHistoryEntry('comment', trimmedCommand, currentPrompt);
+      return;
+    }
+    
     addHistoryEntry('input', trimmedCommand, currentPrompt);
 
     const { commandName, args } = parseCommand(trimmedCommand);
@@ -200,6 +206,7 @@ export function SqlCliComponent() {
           "  ASSIST \"<your_sql_question>\"; -- Get AI syntax help",
           "  CLEAR; -- Clear the terminal",
           "  HELP; -- Show this help message",
+          "  -- <your_comment> -- Add a comment (ignored by SQL engine)",
         ]);
         break;
       default:
@@ -234,14 +241,21 @@ export function SqlCliComponent() {
       <ScrollArea className="flex-grow w-full bg-input/30 rounded-md p-3 md:p-4 shadow-inner" ref={scrollAreaRef}>
         <div className="text-sm md:text-base">
           {history.map(entry => (
-            <div key={entry.id} className={`mb-1.5 ${entry.type === 'error' ? 'text-destructive' : entry.type === 'assist-output' ? 'text-accent' : 'text-foreground/90'}`}>
-              {entry.type === 'input' && (
+            <div key={entry.id} className={`mb-1.5 ${
+                entry.type === 'error' ? 'text-destructive' 
+                : entry.type === 'assist-output' ? 'text-accent' 
+                : entry.type === 'comment' ? 'text-muted-foreground/80' // Style for comments
+                : 'text-foreground/90'
+            }`}>
+              {(entry.type === 'input' || entry.type === 'comment') && ( // Also show prompt for comments
                 <div className="flex">
                   <span className="text-accent mr-1">{entry.prompt}</span>
-                  <span>{entry.content}</span>
+                  <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>
                 </div>
               )}
-              {(entry.type === 'output' || entry.type === 'error' || entry.type === 'assist-input' || entry.type === 'assist-output') && (
+              {(entry.type === 'output' || entry.type === 'error' || entry.type === 'assist-input' || entry.type === 'assist-output') && 
+               entry.type !== 'comment' && // Ensure comments are not re-rendered here
+              (
                 Array.isArray(entry.content) ? 
                   entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{line}</pre>) :
                   <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>

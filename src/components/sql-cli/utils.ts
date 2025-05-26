@@ -10,12 +10,21 @@ export const parseCommand = (command: string): { commandName: string; args: stri
 };
 
 const formatTableOutput = (headers: string[], rows: string[][]): string[] => {
-  if (rows.length === 0 && headers.length === 1 && headers[0] !== 'Field Definition') { 
-    return [headers[0], '-'.repeat(Math.max(10, headers[0].length)), ...rows.flat()];
+  if (rows.length === 0 && headers.length === 1 && headers[0] !== 'Field Definition' && !headers[0].startsWith('Tables_in_')) {
+    return ["Empty set"];
   }
+   if (rows.length === 0 && headers.length === 1 && headers[0].startsWith('Tables_in_')) {
+    return [`Empty set (0 tables in ${headers[0].substring('Tables_in_'.length)})`];
+  }
+  if (rows.length === 0 && headers.length > 0 && headers[0] === 'Database') {
+     return ["Empty set (0 databases)"];
+  }
+
+
   if (rows.length === 0) {
     return ["Empty set"];
   }
+
 
   const colWidths = headers.map((header, i) =>
     Math.max(header.length, ...rows.map(row => String(row[i] ?? '').length))
@@ -134,7 +143,7 @@ export const handleShowTables = (
   }
   const tableNames = Object.keys(db.tables);
   if (tableNames.length === 0) {
-    return [`Empty set (0 tables in ${currentDbName})`];
+    return formatTableOutput([`Tables_in_${currentDbName}`], []); // Use formatTableOutput for consistency
   }
   return formatTableOutput([`Tables_in_${currentDbName}`], tableNames.map(name => [name]));
 };
@@ -153,7 +162,6 @@ export const handleDescribeTable = (
   }
   
   const headers = ['Field', 'Type'];
-  // Constraints (Null, Key, Default, Extra) are not fully parsed yet, just showing name and type
   const rows = table.parsedColumns.map(col => [col.name, col.type.toUpperCase()]);
   
   if (rows.length === 0) {
@@ -184,17 +192,20 @@ export const handleInsertData = (
     return { output: `Error: Table '${tableName}' does not exist in database '${currentDbName}'.` };
   }
 
-  const values = valuesStr.split(',').map(v => v.trim().replace(/^['"]|['"]$/g, '')); // Strip quotes and trim
+  const values = valuesStr.split(',').map(v => v.trim().replace(/^['"](.*)['"]$/, '$1').replace(/^'(.*)'$/, '$1'));
 
-  // Determine target columns: either specified in INSERT or all columns from table schema
+
   let targetColumns: ColumnDefinition[];
   if (columnNamesStr) {
     const specifiedColumnNames = columnNamesStr.split(',').map(name => name.trim());
-    targetColumns = specifiedColumnNames.map(name => {
-      const colDef = table.parsedColumns.find(c => c.name.toLowerCase() === name.toLowerCase());
-      if (!colDef) throw new Error(`Column '${name}' not found in table '${tableName}'.`); // This error should be caught and returned as output
-      return colDef;
-    });
+    targetColumns = [];
+    for (const name of specifiedColumnNames) {
+        const colDef = table.parsedColumns.find(c => c.name.toLowerCase() === name.toLowerCase());
+        if (!colDef) {
+             return { output: `Error: Column '${name}' not found in table '${tableName}'.` };
+        }
+        targetColumns.push(colDef);
+    }
   } else {
     targetColumns = table.parsedColumns;
   }
@@ -209,14 +220,22 @@ export const handleInsertData = (
       const colDef = targetColumns[i];
       let value: any = values[i];
 
-      if (colDef.type.startsWith('INT') || colDef.type.startsWith('INTEGER')) {
+      if (value === 'NULL') {
+        value = null;
+      } else if (colDef.type.startsWith('INT') || colDef.type.startsWith('INTEGER') || colDef.type.startsWith('NUMBER')) {
         const num = parseInt(value, 10);
         if (isNaN(num)) {
-          return { output: `Error: Invalid integer value '${value}' for column '${colDef.name}'.` };
+          return { output: `Error: Invalid integer value '${values[i]}' for column '${colDef.name}'.` };
+        }
+        value = num;
+      } // Add more type coercions if needed (e.g., BOOLEAN, DATE)
+      else if (colDef.type.startsWith('FLOAT') || colDef.type.startsWith('DOUBLE') || colDef.type.startsWith('REAL')) {
+        const num = parseFloat(value);
+        if (isNaN(num)) {
+          return { output: `Error: Invalid float value '${values[i]}' for column '${colDef.name}'.` };
         }
         value = num;
       }
-      // Add more type coercions if needed (e.g., BOOLEAN, DATE)
       newRow[colDef.name] = value;
     }
   } catch (e: any) {
@@ -242,6 +261,49 @@ export const handleInsertData = (
   return { newDatabases: updatedDatabases, output: `1 row inserted into '${tableName}'.` };
 };
 
+
+const parseWhereClause = (whereClauseStr: string | undefined, table: TableSchema): ((row: Record<string, any>) => boolean) | string => {
+  if (!whereClauseStr) {
+    return () => true; // No WHERE clause means all rows match
+  }
+
+  // Basic WHERE clause parsing: colName = 'value' or colName = number or colName = "value"
+  // More complex conditions (AND, OR, LIKE, >, <, etc.) are not supported yet.
+  const whereMatch = whereClauseStr.match(/(\w+)\s*=\s*(?:'([^']*)'|"([^"]*)"|(\S+))/);
+  if (whereMatch) {
+    const [, colName, strValueSingleQuote, strValueDoubleQuote, unquotedValue] = whereMatch;
+    const filterValueStr = strValueSingleQuote ?? strValueDoubleQuote ?? unquotedValue;
+    
+    const colDef = table.parsedColumns.find(c => c.name.toLowerCase() === colName.toLowerCase());
+    if (!colDef) {
+      return `Error: Column '${colName}' not found in WHERE clause for table '${table.columnsDefinition}'.`; // Table name not directly available here easily
+    }
+
+    let filterValue: any = filterValueStr;
+    if (filterValueStr === 'NULL') {
+      filterValue = null;
+    } else if (colDef.type.startsWith('INT') || colDef.type.startsWith('INTEGER') || colDef.type.startsWith('NUMBER')) {
+      filterValue = parseInt(filterValueStr, 10);
+      if (isNaN(filterValue)) {
+         return `Error: Invalid number for comparison in WHERE clause for column '${colName}'.`;
+      }
+    } else if (colDef.type.startsWith('FLOAT') || colDef.type.startsWith('DOUBLE') || colDef.type.startsWith('REAL')) {
+        filterValue = parseFloat(filterValueStr);
+        if (isNaN(filterValue)) {
+           return `Error: Invalid float for comparison in WHERE clause for column '${colName}'.`;
+        }
+    }
+    
+    return (row: Record<string, any>) => {
+      const rowValue = row[colDef.name];
+      return rowValue === filterValue;
+    };
+  } else {
+    return `Error: Unsupported WHERE clause format. Use 'column = value' or 'column = "text value"' or column = 'text value'.`;
+  }
+};
+
+
 export const handleSelectData = (
   fullCommand: string,
   currentDbName: string | null,
@@ -251,7 +313,6 @@ export const handleSelectData = (
     return { output: "Error: No database selected or database does not exist. Use 'USE <database_name>;'." };
   }
   
-  // Regex to capture: SELECT (columns) FROM (tableName) [WHERE (condition)]
   const match = fullCommand.match(/^SELECT\s+(.+?)\s+FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+WHERE\s+(.+?))?\s*;?$/i);
 
   if (!match) {
@@ -265,43 +326,17 @@ export const handleSelectData = (
     return { output: `Error: Table '${tableName}' does not exist in database '${currentDbName}'.` };
   }
 
-  let selectedData = [...table.data]; // Start with all data
-
-  // Basic WHERE clause parsing: colName = 'value' or colName = number
-  if (whereClauseStr) {
-    const whereMatch = whereClauseStr.match(/(\w+)\s*=\s*(?:'([^']*)'|"([^"]*)"|(\S+))/);
-    if (whereMatch) {
-      const [, colName, strValue1, strValue2, numOrUnquotedValue] = whereMatch;
-      const filterValueStr = strValue1 || strValue2 || numOrUnquotedValue;
-      
-      const colDef = table.parsedColumns.find(c => c.name.toLowerCase() === colName.toLowerCase());
-      if (!colDef) {
-        return { output: `Error: Column '${colName}' not found in WHERE clause for table '${tableName}'.` };
-      }
-
-      let filterValue: any = filterValueStr;
-      if (colDef.type.startsWith('INT') || colDef.type.startsWith('INTEGER')) {
-        filterValue = parseInt(filterValueStr, 10);
-        if (isNaN(filterValue)) {
-           return { output: `Error: Invalid number for comparison in WHERE clause for column '${colName}'.` };
-        }
-      }
-      
-      selectedData = selectedData.filter(row => {
-        // Handle potential case differences in row keys if necessary, though parsedColumns should be consistent
-        const rowValue = row[colDef.name]; 
-        return rowValue === filterValue;
-      });
-    } else {
-      return { output: `Error: Unsupported WHERE clause format. Use 'column = value' or 'column = "text value"'.` };
-    }
+  const filterFn = parseWhereClause(whereClauseStr, table);
+  if (typeof filterFn === 'string') {
+    return { output: filterFn }; // Contains an error message
   }
 
-  if (selectedData.length === 0) {
+  const filteredData = table.data.filter(filterFn);
+
+  if (filteredData.length === 0) {
     return { output: "Empty set" };
   }
 
-  // Column projection
   const requestedColumns = columnsStr.trim() === '*' 
     ? table.parsedColumns.map(c => c.name) 
     : columnsStr.split(',').map(c => c.trim());
@@ -314,10 +349,169 @@ export const handleSelectData = (
     return { output: `Error: None of the requested columns (${columnsStr}) found in table '${tableName}'.`};
   }
   
-  const finalRows = selectedData.map(row => 
-    headers.map(header => row[header] ?? null) // Ensure header exists in row, provide null if not (shouldn't happen with good data)
+  const finalRows = filteredData.map(row => 
+    headers.map(header => row[header] ?? 'NULL') 
   );
 
   return { output: formatTableOutput(headers, finalRows.map(row => row.map(cell => String(cell)))) };
 };
 
+
+export const handleDropTable = (
+  tableName: string,
+  currentDbName: string | null,
+  databases: DatabasesStructure
+): { newDatabases?: DatabasesStructure; output: string } => {
+  if (!currentDbName || !databases[currentDbName]) {
+    return { output: "Error: No database selected or database does not exist." };
+  }
+  if (!databases[currentDbName].tables[tableName]) {
+    return { output: `Error: Table '${tableName}' does not exist in database '${currentDbName}'.` };
+  }
+
+  const newDatabases = JSON.parse(JSON.stringify(databases)); // Deep copy
+  delete newDatabases[currentDbName].tables[tableName];
+
+  return { newDatabases, output: `Table '${tableName}' dropped successfully.` };
+};
+
+export const handleDropDatabase = (
+  dbNameToDrop: string,
+  currentDbName: string | null,
+  databases: DatabasesStructure
+): { newDatabases?: DatabasesStructure; newCurrentDb?: string | null; output: string } => {
+  if (!databases[dbNameToDrop]) {
+    return { output: `Error: Database '${dbNameToDrop}' does not exist.` };
+  }
+
+  const newDatabases = JSON.parse(JSON.stringify(databases)); // Deep copy
+  delete newDatabases[dbNameToDrop];
+
+  let newCurrentDb = currentDbName;
+  if (currentDbName === dbNameToDrop) {
+    newCurrentDb = null;
+  }
+
+  return { newDatabases, newCurrentDb, output: `Database '${dbNameToDrop}' dropped successfully.` };
+};
+
+export const handleDeleteData = (
+  fullCommand: string,
+  currentDbName: string | null,
+  databases: DatabasesStructure
+): { newDatabases?: DatabasesStructure; output: string } => {
+  if (!currentDbName || !databases[currentDbName]) {
+    return { output: "Error: No database selected or database does not exist." };
+  }
+
+  const match = fullCommand.match(/^DELETE\s+FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+WHERE\s+(.+?))?\s*;?$/i);
+  if (!match) {
+    return { output: "Error: Invalid DELETE syntax. Expected: DELETE FROM table_name [WHERE condition];" };
+  }
+
+  const [, tableName, whereClauseStr] = match;
+  const table = databases[currentDbName].tables[tableName];
+
+  if (!table) {
+    return { output: `Error: Table '${tableName}' does not exist in database '${currentDbName}'.` };
+  }
+
+  const filterFn = parseWhereClause(whereClauseStr, table);
+  if (typeof filterFn === 'string') {
+    return { output: filterFn }; // Error message from parseWhereClause
+  }
+
+  let deletedCount = 0;
+  const newData = table.data.filter(row => {
+    if (filterFn(row)) {
+      deletedCount++;
+      return false; // Don't keep if matches
+    }
+    return true; // Keep if doesn't match
+  });
+
+  const newDatabases = JSON.parse(JSON.stringify(databases));
+  newDatabases[currentDbName].tables[tableName].data = newData;
+
+  return { newDatabases, output: `${deletedCount} row(s) deleted from '${tableName}'.` };
+};
+
+export const handleUpdateData = (
+  fullCommand: string,
+  currentDbName: string | null,
+  databases: DatabasesStructure
+): { newDatabases?: DatabasesStructure; output: string } => {
+  if (!currentDbName || !databases[currentDbName]) {
+    return { output: "Error: No database selected or database does not exist." };
+  }
+
+  const match = fullCommand.match(/^UPDATE\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+SET\s+(.+?)(?:\s+WHERE\s+(.+?))?\s*;?$/i);
+  if (!match) {
+    return { output: "Error: Invalid UPDATE syntax. Expected: UPDATE table_name SET col1 = val1, ... [WHERE condition];" };
+  }
+
+  const [, tableName, setClauseStr, whereClauseStr] = match;
+  const table = databases[currentDbName].tables[tableName];
+
+  if (!table) {
+    return { output: `Error: Table '${tableName}' does not exist in database '${currentDbName}'.` };
+  }
+
+  const setAssignments: Array<{ column: string; value: any }> = [];
+  const setParts = setClauseStr.split(',').map(p => p.trim());
+
+  for (const part of setParts) {
+    const assignMatch = part.match(/(\w+)\s*=\s*(?:'([^']*)'|"([^"]*)"|(\S+))/);
+    if (!assignMatch) {
+      return { output: `Error: Invalid SET assignment: '${part}'. Expected format: column = value.` };
+    }
+    const [, columnName, strValueSingle, strValueDouble, unquotedValue] = assignMatch;
+    let valueStr = strValueSingle ?? strValueDouble ?? unquotedValue;
+
+    const colDef = table.parsedColumns.find(c => c.name.toLowerCase() === columnName.toLowerCase());
+    if (!colDef) {
+      return { output: `Error: Column '${columnName}' not found in table '${tableName}' for SET clause.` };
+    }
+    
+    let value: any = valueStr;
+    if (valueStr.toUpperCase() === 'NULL') {
+        value = null;
+    } else if (colDef.type.startsWith('INT') || colDef.type.startsWith('INTEGER') || colDef.type.startsWith('NUMBER')) {
+      value = parseInt(valueStr, 10);
+      if (isNaN(value)) return { output: `Error: Invalid integer value '${valueStr}' for column '${columnName}'.` };
+    } else if (colDef.type.startsWith('FLOAT') || colDef.type.startsWith('DOUBLE') || colDef.type.startsWith('REAL')) {
+      value = parseFloat(valueStr);
+      if (isNaN(value)) return { output: `Error: Invalid float value '${valueStr}' for column '${columnName}'.` };
+    } else if (colDef.type.startsWith('VARCHAR') || colDef.type.startsWith('TEXT') || colDef.type.startsWith('CHAR')) {
+       // Value is already a string, potentially stripped of outer quotes by regex if they were present
+    }
+    setAssignments.push({ column: colDef.name, value });
+  }
+
+  if (setAssignments.length === 0) {
+    return { output: "Error: No valid SET assignments found." };
+  }
+
+  const filterFn = parseWhereClause(whereClauseStr, table);
+  if (typeof filterFn === 'string') {
+    return { output: filterFn }; // Error message
+  }
+
+  let updatedCount = 0;
+  const newData = table.data.map(row => {
+    if (filterFn(row)) {
+      updatedCount++;
+      const newRow = { ...row };
+      setAssignments.forEach(assign => {
+        newRow[assign.column] = assign.value;
+      });
+      return newRow;
+    }
+    return row;
+  });
+
+  const newDatabases = JSON.parse(JSON.stringify(databases));
+  newDatabases[currentDbName].tables[tableName].data = newData;
+
+  return { newDatabases, output: `${updatedCount} row(s) updated in '${tableName}'.` };
+};

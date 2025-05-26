@@ -19,12 +19,16 @@ import {
   handleShowTables,
   handleDescribeTable,
   handleInsertData,
-  handleSelectData
+  handleSelectData,
+  handleDropTable,
+  handleDropDatabase,
+  handleUpdateData,
+  handleDeleteData
 } from './utils';
 
 // Client-side UI state keys for localStorage
-const SQL_CLIQ_CURRENT_DB_KEY = 'sqlCliqCurrentDb_v2'; // Renamed to avoid conflict with old structure
-const SQL_CLIQ_HISTORY_KEY = 'sqlCliqHistory_v2';     // Renamed
+const SQL_CLIQ_CURRENT_DB_KEY = 'sqlCliqCurrentDb_v2'; 
+const SQL_CLIQ_HISTORY_KEY = 'sqlCliqHistory_v2';     
 
 export function SqlCliComponent() {
   const [inputValue, setInputValue] = useState('');
@@ -46,11 +50,9 @@ export function SqlCliComponent() {
   }, []);
 
 
-  // Load client-side state (history, currentDb) from localStorage and server-side data on mount
   useEffect(() => {
     setIsMounted(true);
     
-    // Load history from localStorage
     try {
       const savedHistory = localStorage.getItem(SQL_CLIQ_HISTORY_KEY);
       if (savedHistory) {
@@ -68,7 +70,6 @@ export function SqlCliComponent() {
       addHistoryEntry('error', "Error loading command history.");
     }
 
-    // Load currentDb from localStorage
     try {
       const savedCurrentDb = localStorage.getItem(SQL_CLIQ_CURRENT_DB_KEY);
       if (savedCurrentDb) setCurrentDatabase(savedCurrentDb);
@@ -76,7 +77,6 @@ export function SqlCliComponent() {
       console.error("Failed to load current database from localStorage:", error);
     }
 
-    // Load databases from server
     const fetchInitialData = async () => {
       setIsLoadingInitialData(true);
       try {
@@ -92,9 +92,8 @@ export function SqlCliComponent() {
     };
     fetchInitialData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // addHistoryEntry not included as it's stable
+  }, [toast]); 
 
-  // Save client-side state (currentDb, history) to localStorage
   useEffect(() => {
     if (isMounted) {
       if (currentDatabase) {
@@ -111,21 +110,18 @@ export function SqlCliComponent() {
     }
   }, [history, isMounted]);
 
-  // Scroll to bottom and focus input
   useEffect(() => {
     if (scrollAreaRef.current) {
       const viewport = scrollAreaRef.current.querySelector('div[data-radix-scroll-area-viewport]');
       if (viewport) viewport.scrollTop = viewport.scrollHeight;
     }
     inputRef.current?.focus();
-  }, [history, isLoadingAssistant, isSavingData]); // Added loading states to dependencies
+  }, [history, isLoadingAssistant, isSavingData]);
 
   const saveDatabasesToServer = async (updatedDatabases: DatabasesStructure) => {
     setIsSavingData(true);
     try {
       await saveDatabasesAction(updatedDatabases);
-      // Optional: add a subtle success indicator or toast
-      // toast({ title: "Data Saved", description: "Changes saved to server."});
     } catch (error: any) {
       console.error("Failed to save databases to server:", error);
       toast({ title: "Server Error", description: error.message || "Could not save database data.", variant: "destructive" });
@@ -154,7 +150,7 @@ export function SqlCliComponent() {
       .map(cmd => cmd.trim())
       .filter(cmd => cmd.length > 0);
 
-    let tempDatabases = { ...databases }; // Work on a temporary copy for batched commands
+    let tempDatabases = { ...databases }; 
 
     for (const commandStr of individualCommandStrings) {
       if (isLoadingAssistant || isSavingData) continue; 
@@ -208,7 +204,7 @@ export function SqlCliComponent() {
         case 'SHOW':
           const showArg = args[0]?.replace(/;/g, '').toUpperCase();
           if (showArg === 'DATABASES') {
-            addHistoryEntry('output', handleShowDatabases(tempDatabases)); // Show current state
+            addHistoryEntry('output', handleShowDatabases(tempDatabases)); 
           } else if (showArg === 'TABLES') {
              addHistoryEntry('output', handleShowTables(currentDatabase, tempDatabases));
           } else {
@@ -218,7 +214,7 @@ export function SqlCliComponent() {
         case 'USE':
           if (args[0]) {
             const dbName = args[0].replace(/;/g, '');
-            result = handleUseDatabase(dbName, tempDatabases); // Check against current state
+            result = handleUseDatabase(dbName, tempDatabases); 
             if (result.newCurrentDb !== undefined && !result.output.startsWith('Error:')) {
               setCurrentDatabase(result.newCurrentDb); 
             }
@@ -246,11 +242,55 @@ export function SqlCliComponent() {
           break;
         case 'SELECT':
           result = handleSelectData(commandStr, currentDatabase, tempDatabases);
-          addHistoryEntry(typeof result.output === 'string' && result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+           addHistoryEntry( (typeof result.output === 'string' && result.output.startsWith('Error:')) ? 'error' : 'output', result.output);
+          break;
+        case 'DROP':
+          if (args[0]?.toUpperCase() === 'TABLE' && args[1]) {
+            const tableName = args[1].replace(/;/g, '');
+            result = handleDropTable(tableName, currentDatabase, tempDatabases);
+            if (result.newDatabases) {
+              tempDatabases = result.newDatabases;
+              needsSave = !result.output.startsWith('Error:');
+            }
+            addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          } else if (args[0]?.toUpperCase() === 'DATABASE' && args[1]) {
+            const dbNameToDrop = args[1].replace(/;/g, '');
+            result = handleDropDatabase(dbNameToDrop, currentDatabase, tempDatabases);
+            if (result.newDatabases) {
+              tempDatabases = result.newDatabases;
+              if (result.newCurrentDb !== undefined) { // Can be null
+                setCurrentDatabase(result.newCurrentDb);
+              }
+              needsSave = !result.output.startsWith('Error:');
+            }
+            addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          } else {
+            addHistoryEntry('error', `Error: Unknown DROP command in '${commandStr}'. Try DROP TABLE <name>; or DROP DATABASE <name>;`);
+          }
+          break;
+        case 'UPDATE':
+          result = handleUpdateData(commandStr, currentDatabase, tempDatabases);
+          if (result.newDatabases) {
+            tempDatabases = result.newDatabases;
+            needsSave = !result.output.startsWith('Error:');
+          }
+          addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          break;
+        case 'DELETE':
+           if (args[0]?.toUpperCase() === 'FROM' && args[1]) {
+            result = handleDeleteData(commandStr, currentDatabase, tempDatabases);
+            if (result.newDatabases) {
+                tempDatabases = result.newDatabases;
+                needsSave = !result.output.startsWith('Error:');
+            }
+            addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+           } else {
+             addHistoryEntry('error', `Error: Invalid DELETE syntax. Expected: DELETE FROM <table_name> ...;`);
+           }
           break;
         case 'CLEAR':
           setHistory([]);
-           addHistoryEntry('output', [ // Re-add welcome after clear
+           addHistoryEntry('output', [ 
             "Terminal cleared.",
             "Welcome to SQL Cliq!",
             "Type 'ASSIST \"your question\"' for AI help.",
@@ -263,12 +303,16 @@ export function SqlCliComponent() {
             "  CREATE DATABASE <db_name>;",
             "  SHOW DATABASES;",
             "  USE <db_name>;",
+            "  DROP DATABASE <db_name>;",
             "  CREATE TABLE <table_name> (col1_def, col2_def, ...);",
             "    Example: CREATE TABLE users (id INT, name VARCHAR(100));",
             "  SHOW TABLES;",
             "  DESCRIBE <table_name>; (or DESC <table_name>;)",
+            "  DROP TABLE <table_name>;",
             "  INSERT INTO <table_name> [(col1, ...)] VALUES (val1, ...);",
             "  SELECT <columns | *> FROM <table_name> [WHERE col = value];",
+            "  UPDATE <table_name> SET col1 = val1, ... [WHERE condition];",
+            "  DELETE FROM <table_name> [WHERE condition];",
             "  ASSIST \"<your_sql_question>\"; -- Get AI syntax help",
             "  CLEAR; -- Clear the terminal",
             "  HELP; -- Show this help message",
@@ -283,11 +327,10 @@ export function SqlCliComponent() {
           }
       }
       if (needsSave) {
-        setDatabases(tempDatabases); // Update main state before saving this iteration's changes
+        setDatabases(tempDatabases); 
         await saveDatabasesToServer(tempDatabases);
       }
     }
-     // Final state update if no individual save happened but tempDatabases changed
     if (JSON.stringify(databases) !== JSON.stringify(tempDatabases)) {
         setDatabases(tempDatabases);
     }

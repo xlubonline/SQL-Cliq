@@ -24,7 +24,8 @@ import {
   handleDropDatabase,
   handleUpdateData,
   handleDeleteData,
-  handleAlterTableAddColumn
+  handleAlterTableAddColumn,
+  handleRenameTable
 } from './utils';
 
 // Client-side UI state keys for localStorage
@@ -301,6 +302,20 @@ export function SqlCliComponent() {
                 addHistoryEntry('error', `Error: Unsupported ALTER command. Try ALTER TABLE <name> ADD COLUMN <col_name> <col_type>;`);
             }
             break;
+        case 'RENAME':
+          if (args[0]?.toUpperCase() === 'TABLE' && args[1] && args[2]?.toUpperCase() === 'TO' && args[3]) {
+            const oldTableName = args[1];
+            const newTableName = args[3].replace(/;/g, '');
+            result = handleRenameTable(oldTableName, newTableName, currentDatabase, tempDatabases);
+            if (result.newDatabases) {
+              tempDatabases = result.newDatabases;
+              needsSave = !result.output.startsWith('Error:');
+            }
+            addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+          } else {
+            addHistoryEntry('error', `Error: Invalid RENAME syntax. Expected: RENAME TABLE <old_name> TO <new_name>;`);
+          }
+          break;
         case 'CLEAR':
           setHistory([]);
            addHistoryEntry('output', [ 
@@ -323,6 +338,7 @@ export function SqlCliComponent() {
             "  DESCRIBE <table_name>; (or DESC <table_name>;)",
             "  ALTER TABLE <table_name> ADD COLUMN <col_name> <col_type_def>;",
             "    Example: ALTER TABLE users ADD COLUMN email VARCHAR(255);",
+            "  RENAME TABLE <old_table_name> TO <new_table_name>;",
             "  DROP TABLE <table_name>;",
             "  INSERT INTO <table_name> [(col1, ...)] VALUES (val1, ...);",
             "  SELECT <columns | *> FROM <table_name> [WHERE cond] [ORDER BY col [ASC|DESC]] [LIMIT num];",

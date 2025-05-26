@@ -71,12 +71,16 @@ export const parseColumnDefinitions = (definitionStr: string): ColumnDefinition[
   return columns;
 };
 
+const isValidIdentifier = (name: string): boolean => {
+  return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
+}
+
 
 export const handleCreateDatabase = (
   dbName: string,
   databases: DatabasesStructure
 ): { newDatabases: DatabasesStructure; output: string } => {
-  if (!dbName || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(dbName)) {
+  if (!dbName || !isValidIdentifier(dbName)) {
     return { newDatabases: databases, output: `Error: Invalid database name '${dbName}'. Names must start with a letter or underscore, followed by letters, numbers, or underscores.` };
   }
   if (databases[dbName]) {
@@ -120,7 +124,7 @@ export const handleCreateTable = (
 
   const [, tableName, columnsDefinitionStr] = match;
 
-  if (!tableName || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
+  if (!tableName || !isValidIdentifier(tableName)) {
      return { newDatabases: databases, output: `Error: Invalid table name '${tableName}'.` };
   }
   
@@ -639,10 +643,10 @@ export const handleAlterTableAddColumn = (
   const columnTypeDefinition = fullCommandArgs.slice(5).join(' ').replace(/;/g, '');
 
 
-  if (!tableName || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
+  if (!tableName || !isValidIdentifier(tableName)) {
     return { output: `Error: Invalid table name '${tableName}' in ALTER TABLE command.` };
   }
-  if (!columnName || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(columnName)) {
+  if (!columnName || !isValidIdentifier(columnName)) {
     return { output: `Error: Invalid new column name '${columnName}'.` };
   }
   if (!columnTypeDefinition) {
@@ -677,4 +681,33 @@ export const handleAlterTableAddColumn = (
   });
 
   return { newDatabases, output: `Column '${columnName}' added to table '${tableName}'.` };
+};
+
+export const handleRenameTable = (
+  oldTableName: string,
+  newTableName: string,
+  currentDbName: string | null,
+  databases: DatabasesStructure
+): { newDatabases?: DatabasesStructure; output: string } => {
+  if (!currentDbName || !databases[currentDbName]) {
+    return { output: "Error: No database selected or database does not exist." };
+  }
+
+  const currentDbSchema = databases[currentDbName];
+  if (!currentDbSchema.tables[oldTableName]) {
+    return { output: `Error: Table '${oldTableName}' does not exist in database '${currentDbName}'.` };
+  }
+  if (currentDbSchema.tables[newTableName]) {
+    return { output: `Error: Table '${newTableName}' already exists in database '${currentDbName}'.` };
+  }
+  if (!isValidIdentifier(newTableName)) {
+    return { output: `Error: Invalid new table name '${newTableName}'. Names must start with a letter or underscore, followed by letters, numbers, or underscores.` };
+  }
+
+  const newDatabases = JSON.parse(JSON.stringify(databases)); // Deep copy
+  const tableToRename = newDatabases[currentDbName].tables[oldTableName];
+  delete newDatabases[currentDbName].tables[oldTableName];
+  newDatabases[currentDbName].tables[newTableName] = tableToRename;
+
+  return { newDatabases, output: `Table '${oldTableName}' renamed to '${newTableName}' successfully.` };
 };

@@ -2,6 +2,7 @@
 'use client';
 
 import { getSqlCommand } from '@/ai/flows/sql-syntax-assistance';
+import { loadDatabasesAction, saveDatabasesAction } from '@/app/actions/sql-data-actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -21,10 +22,9 @@ import {
   handleSelectData
 } from './utils';
 
-const SQL_CLIQ_DATABASES_KEY = 'sqlCliqDatabases';
-const SQL_CLIQ_CURRENT_DB_KEY = 'sqlCliqCurrentDb';
-const SQL_CLIQ_HISTORY_KEY = 'sqlCliqHistory';
-
+// Client-side UI state keys for localStorage
+const SQL_CLIQ_CURRENT_DB_KEY = 'sqlCliqCurrentDb_v2'; // Renamed to avoid conflict with old structure
+const SQL_CLIQ_HISTORY_KEY = 'sqlCliqHistory_v2';     // Renamed
 
 export function SqlCliComponent() {
   const [inputValue, setInputValue] = useState('');
@@ -33,52 +33,68 @@ export function SqlCliComponent() {
   const [currentDatabase, setCurrentDatabase] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [isLoadingAssistant, setIsLoadingAssistant] = useState(false);
+  const [isSavingData, setIsSavingData] = useState(false);
+  const [isLoadingInitialData, setIsLoadingInitialData] = useState(true);
+
 
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  // Load state from localStorage on mount
+  const addHistoryEntry = useCallback((type: HistoryEntry['type'], content: string | string[], currentPrompt?: string) => {
+    setHistory(prev => [...prev, { id: Date.now().toString() + Math.random(), type, content, prompt: currentPrompt }]);
+  }, []);
+
+
+  // Load client-side state (history, currentDb) from localStorage and server-side data on mount
   useEffect(() => {
     setIsMounted(true);
+    
+    // Load history from localStorage
     try {
-      const savedDatabases = localStorage.getItem(SQL_CLIQ_DATABASES_KEY);
-      if (savedDatabases) setDatabases(JSON.parse(savedDatabases));
-
-      const savedCurrentDb = localStorage.getItem(SQL_CLIQ_CURRENT_DB_KEY);
-      if (savedCurrentDb) setCurrentDatabase(savedCurrentDb);
-      
       const savedHistory = localStorage.getItem(SQL_CLIQ_HISTORY_KEY);
       if (savedHistory) {
         setHistory(JSON.parse(savedHistory));
       } else {
-         // Initial welcome message if no history
         addHistoryEntry('output', [
           "Welcome to SQL Cliq!",
-          "Type 'ASSIST \"your question\"' for AI help (e.g., ASSIST \"how to create a table\").",
+          "Type 'ASSIST \"your question\"' for AI help.",
           "Type 'HELP;' for a list of basic commands.",
+          "Database data is now saved on the server (simulated).",
         ]);
       }
-
     } catch (error) {
-      console.error("Failed to load state from localStorage:", error);
-      toast({ title: "Error", description: "Could not load saved session data.", variant: "destructive" });
-       addHistoryEntry('output', [
-          "Welcome to SQL Cliq!",
-          "Type 'ASSIST \"your question\"' for AI help (e.g., ASSIST \"how to create a table\").",
-          "Type 'HELP;' for a list of basic commands.",
-        ]);
+      console.error("Failed to load history from localStorage:", error);
+      addHistoryEntry('error', "Error loading command history.");
     }
+
+    // Load currentDb from localStorage
+    try {
+      const savedCurrentDb = localStorage.getItem(SQL_CLIQ_CURRENT_DB_KEY);
+      if (savedCurrentDb) setCurrentDatabase(savedCurrentDb);
+    } catch (error) {
+      console.error("Failed to load current database from localStorage:", error);
+    }
+
+    // Load databases from server
+    const fetchInitialData = async () => {
+      setIsLoadingInitialData(true);
+      try {
+        const serverDatabases = await loadDatabasesAction();
+        setDatabases(serverDatabases);
+      } catch (error: any) {
+        console.error("Failed to load databases from server:", error);
+        toast({ title: "Server Error", description: error.message || "Could not load database data.", variant: "destructive" });
+        addHistoryEntry('error', `Error: Could not load databases from server. ${error.message}`);
+      } finally {
+        setIsLoadingInitialData(false);
+      }
+    };
+    fetchInitialData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // addHistoryEntry is not stable, so not including it here
+  }, [toast]); // addHistoryEntry not included as it's stable
 
-  // Save state to localStorage
-  useEffect(() => {
-    if (isMounted) {
-      localStorage.setItem(SQL_CLIQ_DATABASES_KEY, JSON.stringify(databases));
-    }
-  }, [databases, isMounted]);
-
+  // Save client-side state (currentDb, history) to localStorage
   useEffect(() => {
     if (isMounted) {
       if (currentDatabase) {
@@ -95,7 +111,6 @@ export function SqlCliComponent() {
     }
   }, [history, isMounted]);
 
-
   // Scroll to bottom and focus input
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -103,12 +118,23 @@ export function SqlCliComponent() {
       if (viewport) viewport.scrollTop = viewport.scrollHeight;
     }
     inputRef.current?.focus();
-  }, [history]);
+  }, [history, isLoadingAssistant, isSavingData]); // Added loading states to dependencies
 
+  const saveDatabasesToServer = async (updatedDatabases: DatabasesStructure) => {
+    setIsSavingData(true);
+    try {
+      await saveDatabasesAction(updatedDatabases);
+      // Optional: add a subtle success indicator or toast
+      // toast({ title: "Data Saved", description: "Changes saved to server."});
+    } catch (error: any) {
+      console.error("Failed to save databases to server:", error);
+      toast({ title: "Server Error", description: error.message || "Could not save database data.", variant: "destructive" });
+      addHistoryEntry('error', `Error: Could not save changes to server. ${error.message}`);
+    } finally {
+      setIsSavingData(false);
+    }
+  };
 
-  const addHistoryEntry = useCallback((type: HistoryEntry['type'], content: string | string[], currentPrompt?: string) => {
-    setHistory(prev => [...prev, { id: Date.now().toString() + Math.random(), type, content, prompt: currentPrompt }]);
-  }, []);
 
   const processCommand = async (fullInputLine: string) => {
     const trimmedFullInputLine = fullInputLine.trim();
@@ -128,8 +154,10 @@ export function SqlCliComponent() {
       .map(cmd => cmd.trim())
       .filter(cmd => cmd.length > 0);
 
+    let tempDatabases = { ...databases }; // Work on a temporary copy for batched commands
+
     for (const commandStr of individualCommandStrings) {
-      if (isLoadingAssistant) continue; // Skip if AI is already working from a previous command in the batch
+      if (isLoadingAssistant || isSavingData) continue; 
 
       const { commandName, args } = parseCommand(commandStr);
       let result: { newDatabases?: DatabasesStructure; newCurrentDb?: string | null; output: string | string[] };
@@ -148,23 +176,30 @@ export function SqlCliComponent() {
           } finally {
             setIsLoadingAssistant(false);
           }
-          continue; // Move to next command in batch if any
+          continue; 
         } else {
           addHistoryEntry('error', "Error: Invalid ASSIST syntax. Expected: ASSIST \"your question about SQL\".");
           continue; 
         }
       }
       
+      let needsSave = false;
       switch (commandName) {
         case 'CREATE':
           if (args[0]?.toUpperCase() === 'DATABASE' && args[1]) {
             const dbName = args[1].replace(/;/g, '');
-            result = handleCreateDatabase(dbName, databases);
-            if (result.newDatabases) setDatabases(result.newDatabases);
+            result = handleCreateDatabase(dbName, tempDatabases);
+            if (result.newDatabases) {
+              tempDatabases = result.newDatabases;
+              needsSave = !result.output.startsWith('Error:');
+            }
             addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
           } else if (args[0]?.toUpperCase() === 'TABLE' && args[1]) {
-             result = handleCreateTable(commandStr, currentDatabase, databases);
-             if (result.newDatabases) setDatabases(result.newDatabases);
+             result = handleCreateTable(commandStr, currentDatabase, tempDatabases);
+             if (result.newDatabases) {
+                tempDatabases = result.newDatabases;
+                needsSave = !result.output.startsWith('Error:');
+             }
              addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
           } else {
             addHistoryEntry('error', `Error: Unknown CREATE command in '${commandStr}'. Try CREATE DATABASE <name>; or CREATE TABLE <name> (...);`);
@@ -173,9 +208,9 @@ export function SqlCliComponent() {
         case 'SHOW':
           const showArg = args[0]?.replace(/;/g, '').toUpperCase();
           if (showArg === 'DATABASES') {
-            addHistoryEntry('output', handleShowDatabases(databases));
+            addHistoryEntry('output', handleShowDatabases(tempDatabases)); // Show current state
           } else if (showArg === 'TABLES') {
-             addHistoryEntry('output', handleShowTables(currentDatabase, databases));
+             addHistoryEntry('output', handleShowTables(currentDatabase, tempDatabases));
           } else {
             addHistoryEntry('error', `Error: Unknown SHOW command in '${commandStr}'. Try SHOW DATABASES; or SHOW TABLES;`);
           }
@@ -183,8 +218,10 @@ export function SqlCliComponent() {
         case 'USE':
           if (args[0]) {
             const dbName = args[0].replace(/;/g, '');
-            result = handleUseDatabase(dbName, databases);
-            if (result.newCurrentDb !== undefined) setCurrentDatabase(result.newCurrentDb); // Allow setting to null
+            result = handleUseDatabase(dbName, tempDatabases); // Check against current state
+            if (result.newCurrentDb !== undefined && !result.output.startsWith('Error:')) {
+              setCurrentDatabase(result.newCurrentDb); 
+            }
             addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
           } else {
             addHistoryEntry('error', `Error: Missing database name for USE command in '${commandStr}'.`);
@@ -194,22 +231,31 @@ export function SqlCliComponent() {
         case 'DESC':
           if (args[0]) {
             const tableName = args[0].replace(/;/g, '');
-            addHistoryEntry('output', handleDescribeTable(tableName, currentDatabase, databases));
+            addHistoryEntry('output', handleDescribeTable(tableName, currentDatabase, tempDatabases));
           } else {
             addHistoryEntry('error', `Error: Missing table name for DESCRIBE command in '${commandStr}'.`);
           }
           break;
         case 'INSERT':
-          result = handleInsertData(commandStr, currentDatabase, databases);
+          result = handleInsertData(commandStr, currentDatabase, tempDatabases);
+          if (result.newDatabases) {
+            tempDatabases = result.newDatabases;
+            needsSave = !result.output.startsWith('Error:');
+          }
           addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
           break;
         case 'SELECT':
-          result = handleSelectData(commandStr, currentDatabase, databases);
+          result = handleSelectData(commandStr, currentDatabase, tempDatabases);
           addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
           break;
         case 'CLEAR':
           setHistory([]);
-          addHistoryEntry('output', "Terminal cleared.");
+           addHistoryEntry('output', [ // Re-add welcome after clear
+            "Terminal cleared.",
+            "Welcome to SQL Cliq!",
+            "Type 'ASSIST \"your question\"' for AI help.",
+            "Type 'HELP;' for a list of basic commands.",
+           ]);
           break;
         case 'HELP':
           addHistoryEntry('output', [
@@ -221,35 +267,46 @@ export function SqlCliComponent() {
             "    Example: CREATE TABLE users (id INT, name VARCHAR(100));",
             "  SHOW TABLES;",
             "  DESCRIBE <table_name>; (or DESC <table_name>;)",
-            "  INSERT INTO <table_name> VALUES (...);",
-            "  SELECT <columns> FROM <table_name>;",
+            "  INSERT INTO <table_name> [(col1, ...)] VALUES (val1, ...);",
+            "  SELECT <columns | *> FROM <table_name> [WHERE col = value];",
             "  ASSIST \"<your_sql_question>\"; -- Get AI syntax help",
             "  CLEAR; -- Clear the terminal",
             "  HELP; -- Show this help message",
             "  -- <your_comment> -- Add a comment (ignored by SQL engine)",
             "Note: Multiple commands can be entered on one line, separated by semicolons.",
+            "Database data is saved on the server (simulated via JSON file).",
           ]);
           break;
         default:
-          if (commandStr) { // Check if commandStr is not empty (e.g. from excessive semicolons)
+          if (commandStr) {
              addHistoryEntry('error', `Error: Unknown command '${commandName}' in '${commandStr}'. Type HELP; for a list of commands.`);
           }
       }
+      if (needsSave) {
+        setDatabases(tempDatabases); // Update main state before saving this iteration's changes
+        await saveDatabasesToServer(tempDatabases);
+      }
+    }
+     // Final state update if no individual save happened but tempDatabases changed
+    if (JSON.stringify(databases) !== JSON.stringify(tempDatabases)) {
+        setDatabases(tempDatabases);
     }
   };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (isLoadingAssistant) return; 
+    if (isLoadingAssistant || isSavingData || isLoadingInitialData) return; 
     processCommand(inputValue);
     setInputValue('');
   };
 
-  if (!isMounted) {
+  if (!isMounted || isLoadingInitialData) {
     return (
       <div className="flex flex-col h-full items-center justify-center bg-background p-4">
         <Terminal className="h-16 w-16 text-accent animate-pulse" />
-        <p className="text-foreground mt-4">Loading SQL Cliq...</p>
+        <p className="text-foreground mt-4">
+          {isLoadingInitialData ? "Loading database from server..." : "Initializing SQL Cliq..."}
+        </p>
       </div>
     );
   }
@@ -259,6 +316,15 @@ export function SqlCliComponent() {
       <header className="mb-2 md:mb-4 flex items-center gap-2">
         <Terminal className="h-6 w-6 text-accent" />
         <h1 className="text-xl font-semibold text-foreground">SQL Cliq</h1>
+        {isSavingData && (
+             <div className="flex items-center text-xs text-muted-foreground">
+                <svg className="animate-spin -ml-1 mr-1 h-3 w-3 " xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Saving...
+            </div>
+        )}
       </header>
       
       <ScrollArea className="flex-grow w-full bg-input/30 rounded-md p-3 md:p-4 shadow-inner" ref={scrollAreaRef}>
@@ -291,7 +357,7 @@ export function SqlCliComponent() {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              <span>Thinking...</span>
+              <span>AI Thinking...</span>
             </div>
           )}
         </div>
@@ -310,13 +376,14 @@ export function SqlCliComponent() {
           placeholder="Type SQL command or HELP; ..."
           spellCheck="false"
           autoComplete="off"
-          disabled={isLoadingAssistant}
+          disabled={isLoadingAssistant || isSavingData || isLoadingInitialData}
         />
         <span className="blinking-cursor text-accent text-sm md:text-base">|</span>
-        <Button type="submit" size="sm" variant="ghost" className="text-accent hover:bg-accent/10 hover:text-accent" disabled={isLoadingAssistant}>
+        <Button type="submit" size="sm" variant="ghost" className="text-accent hover:bg-accent/10 hover:text-accent" disabled={isLoadingAssistant || isSavingData || isLoadingInitialData || !inputValue.trim()}>
           Enter
         </Button>
       </form>
     </div>
   );
 }
+

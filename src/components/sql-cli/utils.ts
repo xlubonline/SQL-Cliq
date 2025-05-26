@@ -1,3 +1,4 @@
+
 import type { DatabasesStructure, TableSchema, DatabaseSchema } from './types';
 
 export const parseCommand = (command: string): { commandName: string; args: string[] } => {
@@ -134,4 +135,42 @@ export const handleDescribeTable = (
     ['Field Definition'],
     [[table.columnsDefinition]]
   );
+};
+
+export const handleInsertData = (
+  fullCommand: string,
+  currentDbName: string | null,
+  databases: DatabasesStructure
+): { output: string | string[] } => {
+  if (!currentDbName) {
+    return { output: "Error: No database selected. Use 'USE <database_name>;'." };
+  }
+  const match = fullCommand.match(/^INSERT\s+INTO\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*(?:\((?:[^)]+)\))?\s*VALUES\s*\((?:[^)]+)\)\s*;?/i);
+  if (!match || !match[1]) {
+    return { output: "Error: Invalid INSERT syntax. Expected: INSERT INTO table_name VALUES (...);" };
+  }
+  const tableName = match[1];
+  if (!databases[currentDbName]?.tables[tableName]) {
+    return { output: `Error: Table '${tableName}' does not exist in database '${currentDbName}'.` };
+  }
+  return { output: `INSERT command for table '${tableName}' acknowledged. Data persistence is not yet fully implemented.` };
+};
+
+export const handleSelectData = (
+  fullCommand: string,
+  currentDbName: string | null,
+  databases: DatabasesStructure
+): { output: string | string[] } => {
+  if (!currentDbName) {
+    return { output: "Error: No database selected. Use 'USE <database_name>;'." };
+  }
+  const match = fullCommand.match(/^SELECT\s+(.+?)\s+FROM\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+WHERE\s+(.+))?\s*;?/i);
+  if (!match || !match[2]) {
+    return { output: "Error: Invalid SELECT syntax. Expected: SELECT columns FROM table_name;" };
+  }
+  const tableName = match[2];
+   if (!databases[currentDbName]?.tables[tableName]) {
+    return { output: `Error: Table '${tableName}' does not exist in database '${currentDbName}'.` };
+  }
+  return { output: `SELECT command for table '${tableName}' acknowledged. Data retrieval is not yet fully implemented.` };
 };

@@ -1,3 +1,4 @@
+
 'use client';
 
 import { getSqlCommand } from '@/ai/flows/sql-syntax-assistance';
@@ -15,7 +16,9 @@ import {
   handleUseDatabase, 
   handleCreateTable,
   handleShowTables,
-  handleDescribeTable
+  handleDescribeTable,
+  handleInsertData,
+  handleSelectData
 } from './utils';
 
 const SQL_CLIQ_DATABASES_KEY = 'sqlCliqDatabases';
@@ -187,6 +190,14 @@ export function SqlCliComponent() {
           addHistoryEntry('error', "Error: Missing table name for DESCRIBE command.");
         }
         break;
+      case 'INSERT':
+        result = handleInsertData(trimmedCommand, currentDatabase, databases);
+        addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+        break;
+      case 'SELECT':
+        result = handleSelectData(trimmedCommand, currentDatabase, databases);
+        addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+        break;
       case 'CLEAR':
         setHistory([]);
         // Optionally, add a cleared message, or leave it blank
@@ -203,6 +214,8 @@ export function SqlCliComponent() {
           "    Example: CREATE TABLE users (id INT, name VARCHAR(100));",
           "  SHOW TABLES;",
           "  DESCRIBE <table_name>; (or DESC <table_name>;)",
+          "  INSERT INTO <table_name> VALUES (...); -- (Acknowledged, no data storage yet)",
+          "  SELECT <columns> FROM <table_name>; -- (Acknowledged, no data retrieval yet)",
           "  ASSIST \"<your_sql_question>\"; -- Get AI syntax help",
           "  CLEAR; -- Clear the terminal",
           "  HELP; -- Show this help message",
@@ -258,7 +271,7 @@ export function SqlCliComponent() {
               (
                 Array.isArray(entry.content) ? 
                   entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{line}</pre>) :
-                  <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>
+                  <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>              
               )}
             </div>
           ))}

@@ -26,7 +26,8 @@ import {
   handleUpdateData,
   handleDeleteData,
   handleAlterTableAddColumn,
-  handleRenameTable
+  handleRenameTable,
+  handlePasswordAttemptAndDropDatabase
 } from './utils';
 
 const SQL_CLIQ_CURRENT_DB_KEY = 'sqlCliqCurrentDb_v2'; 
@@ -42,6 +43,7 @@ export function SqlCliComponent() {
   const [isSavingData, setIsSavingData] = useState(false);
   const [isLoadingInitialData, setIsLoadingInitialData] = useState(true);
   const [awaitingPasswordForDb, setAwaitingPasswordForDb] = useState<string | null>(null);
+  const [awaitingPasswordForDropDb, setAwaitingPasswordForDropDb] = useState<string | null>(null);
 
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -128,7 +130,7 @@ export function SqlCliComponent() {
       if (viewport) viewport.scrollTop = viewport.scrollHeight;
     }
     inputRef.current?.focus();
-  }, [history, isLoadingAssistant, isSavingData, awaitingPasswordForDb]);
+  }, [history, isLoadingAssistant, isSavingData, awaitingPasswordForDb, awaitingPasswordForDropDb]);
 
   const saveDatabasesToServer = async (updatedDatabases: DatabasesStructure) => {
     setIsSavingData(true);
@@ -148,12 +150,27 @@ export function SqlCliComponent() {
     const trimmedFullInputLine = fullInputLine.trim();
     if (!trimmedFullInputLine) return;
 
-    let currentPromptText = `${currentDatabase ? `${currentDatabase}$` : 'DOTSER@sql-cliq $'}`;
-    if (awaitingPasswordForDb) {
-      currentPromptText = `Password for ${awaitingPasswordForDb}:`;
-    }
+    let currentPromptText = getPromptText(); // Use helper for current prompt
     
     addHistoryEntry('input', trimmedFullInputLine, currentPromptText);
+
+    if (awaitingPasswordForDropDb) {
+      const dbToDrop = awaitingPasswordForDropDb;
+      const password = trimmedFullInputLine;
+      setAwaitingPasswordForDropDb(null); // Clear password drop mode
+
+      const dropAuthResult = handlePasswordAttemptAndDropDatabase(dbToDrop, password, currentDatabase, databases);
+      
+      if (dropAuthResult.newDatabases) { // Successfully dropped
+        setDatabases(dropAuthResult.newDatabases);
+        if (dropAuthResult.newCurrentDb !== undefined) {
+          setCurrentDatabase(dropAuthResult.newCurrentDb);
+        }
+        await saveDatabasesToServer(dropAuthResult.newDatabases);
+      }
+      addHistoryEntry(dropAuthResult.output.startsWith('Error:') ? 'error' : 'output', dropAuthResult.output);
+      return; // Password attempt for drop processed
+    }
 
     if (awaitingPasswordForDb) {
       const dbToAuth = awaitingPasswordForDb;
@@ -287,14 +304,24 @@ export function SqlCliComponent() {
           } else if (args[0]?.toUpperCase() === 'DATABASE' && args[1]) {
             const dbNameToDrop = args[1].replace(/;/g, '');
             result = handleDropDatabase(dbNameToDrop, currentDatabase, tempDatabases);
+            
+            if (result.requiresPasswordInputForDrop && result.dbToAuthForDrop) {
+                setAwaitingPasswordForDropDb(result.dbToAuthForDrop);
+                addHistoryEntry('output', result.output);
+                // Important: if this line has multiple commands, and this one requires password,
+                // we need to stop processing the rest of the commands on this line here.
+                // The password input will be handled on the next submission.
+                return; 
+            }
+
             if (result.newDatabases) {
               tempDatabases = result.newDatabases;
               if (result.newCurrentDb !== undefined) { 
                 setCurrentDatabase(result.newCurrentDb);
               }
-              needsSave = !result.output.startsWith('Error:');
+              needsSave = !(typeof result.output === 'string' && result.output.startsWith('Error:'));
             }
-            addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+            addHistoryEntry( (typeof result.output === 'string' && result.output.startsWith('Error:')) || (Array.isArray(result.output) && typeof result.output[0] === 'string' && result.output[0].startsWith('Error:')) ? 'error' : 'output', result.output);
           } else {
             addHistoryEntry('error', `Error: Unknown DROP command in '${commandStr}'. Try DROP TABLE <name>; or DROP DATABASE <name>;`);
           }
@@ -354,6 +381,7 @@ export function SqlCliComponent() {
           setHistory([]);
           setCurrentDatabase(null);
           setAwaitingPasswordForDb(null);
+          setAwaitingPasswordForDropDb(null);
           addHistoryEntry('output', "Goodbye!");
           setTimeout(() => addHistoryEntry('output', initialWelcomeMessages), 50);
           break;
@@ -363,7 +391,7 @@ export function SqlCliComponent() {
             "  CREATE DATABASE <db_name> [WITH PASSWORD '<password>'];",
             "  SHOW DATABASES;",
             "  USE <db_name>; (If password protected, enter password on next line)",
-            "  DROP DATABASE <db_name>;",
+            "  DROP DATABASE <db_name>; (If protected & not current DB, prompts for password)",
             "  CREATE TABLE <table_name> (col1_def, col2_def, ...);",
             "    Example: CREATE TABLE users (id INT, name VARCHAR(100));",
             "  SHOW TABLES;",
@@ -397,7 +425,7 @@ export function SqlCliComponent() {
         await saveDatabasesToServer(tempDatabases);
       }
     }
-    if (JSON.stringify(databases) !== JSON.stringify(tempDatabases) && !awaitingPasswordForDb) {
+    if (JSON.stringify(databases) !== JSON.stringify(tempDatabases) && !awaitingPasswordForDb && !awaitingPasswordForDropDb) {
         setDatabases(tempDatabases); 
     }
   };
@@ -410,10 +438,13 @@ export function SqlCliComponent() {
   };
 
   const getPromptText = () => {
+    if (awaitingPasswordForDropDb) {
+      return `Password to drop ${awaitingPasswordForDropDb}:`;
+    }
     if (awaitingPasswordForDb) {
       return `Password for ${awaitingPasswordForDb}:`;
     }
-    return currentDatabase ? `${currentDatabase}$` : '@sql-cliq $';
+    return currentDatabase ? `${currentDatabase}$` : 'DOTSER@sql-cliq $';
   };
 
   if (!isMounted || isLoadingInitialData) {
@@ -458,12 +489,10 @@ export function SqlCliComponent() {
                   <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>
                 </div>
               ) : entry.type === 'output' || entry.type === 'error' ? (
-                // Apply "»›› " prefix for output and error types
                 Array.isArray(entry.content) ? 
                   entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{`»›› ${line}`}</pre>) :
                   <pre className="whitespace-pre-wrap break-words">{`»›› ${entry.content}`}</pre>
               ) : (entry.type === 'assist-input' || entry.type === 'assist-output') ? (
-                // Render assist types without "»›› " prefix
                 Array.isArray(entry.content) ? 
                   entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{line}</pre>) :
                   <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>
@@ -488,11 +517,17 @@ export function SqlCliComponent() {
         </span>
         <Input
           ref={inputRef}
-          type={awaitingPasswordForDb ? "password" : "text"}
+          type={awaitingPasswordForDb || awaitingPasswordForDropDb ? "password" : "text"}
           value={inputValue}
           onChange={e => setInputValue(e.target.value)}
           className="flex-grow bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 h-auto text-sm md:text-base text-foreground placeholder:text-muted-foreground"
-          placeholder={awaitingPasswordForDb ? "Enter password..." : "Type SQL command or HELP; ..."}
+          placeholder={
+            awaitingPasswordForDropDb 
+              ? "Enter password to confirm drop..." 
+              : awaitingPasswordForDb 
+                ? "Enter password..." 
+                : "Type SQL command or HELP; ..."
+          }
           spellCheck="false"
           autoComplete="off"
           disabled={isLoadingAssistant || isSavingData || isLoadingInitialData}

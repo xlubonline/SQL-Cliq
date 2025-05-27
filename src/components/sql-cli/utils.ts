@@ -529,16 +529,29 @@ export const handleDropDatabase = (
   dbNameToDrop: string,
   currentDbName: string | null,
   databases: DatabasesStructure
-): { newDatabases?: DatabasesStructure; newCurrentDb?: string | null; output: string } => {
+): { 
+  newDatabases?: DatabasesStructure; 
+  newCurrentDb?: string | null; 
+  output: string | string[]; 
+  requiresPasswordInputForDrop?: boolean; 
+  dbToAuthForDrop?: string 
+} => {
   if (!databases[dbNameToDrop]) {
     return { output: `Error: Database '${dbNameToDrop}' does not exist.` };
   }
-   // Cannot drop a password-protected database without further auth - simple restriction for now
-  if (databases[dbNameToDrop].passwordHash && currentDbName !== dbNameToDrop) {
-    return { output: `Error: Database '${dbNameToDrop}' is password protected. USE the database first to manage it.` };
+
+  const dbSchema = databases[dbNameToDrop];
+  if (dbSchema.passwordHash && currentDbName !== dbNameToDrop) {
+    // It's password protected AND it's not the current database (password wasn't entered via USE for this db)
+    return { 
+      output: [`Password required to drop database '${dbNameToDrop}'.`, "Enter password on the next line:"], 
+      requiresPasswordInputForDrop: true, 
+      dbToAuthForDrop: dbNameToDrop 
+    };
   }
 
-
+  // If not password protected, OR if it is protected but IS the currentDbName (password already verified)
+  // Proceed with dropping directly
   const newDatabases = JSON.parse(JSON.stringify(databases)); 
   delete newDatabases[dbNameToDrop];
 
@@ -549,6 +562,33 @@ export const handleDropDatabase = (
 
   return { newDatabases, newCurrentDb, output: `Database '${dbNameToDrop}' dropped successfully.` };
 };
+
+export const handlePasswordAttemptAndDropDatabase = (
+  dbNameToDrop: string,
+  enteredPassword: string,
+  currentDbName: string | null,
+  databases: DatabasesStructure
+): { newDatabases?: DatabasesStructure; newCurrentDb?: string | null; output: string } => {
+  const dbSchema = databases[dbNameToDrop];
+  if (!dbSchema || !dbSchema.passwordHash) {
+    // Should not happen if requiresPasswordInputForDrop was true
+    return { output: `Error: Database '${dbNameToDrop}' is not password protected or does not exist.` };
+  }
+
+  if (verifyPassword(enteredPassword, dbSchema.passwordHash)) {
+    const newDatabases = JSON.parse(JSON.stringify(databases));
+    delete newDatabases[dbNameToDrop];
+
+    let newCurrentDb = currentDbName;
+    if (currentDbName === dbNameToDrop) {
+      newCurrentDb = null;
+    }
+    return { newDatabases, newCurrentDb, output: `Database '${dbNameToDrop}' dropped successfully.` };
+  } else {
+    return { output: `Error: Invalid password for dropping database '${dbNameToDrop}'. Drop failed.` };
+  }
+};
+
 
 export const handleDeleteData = (
   fullCommand: string,
@@ -685,12 +725,15 @@ export const handleAlterTableAddColumn = (
     return { output: "Error: No database selected or database does not exist." };
   }
 
+  // fullCommandArgs will be like ['TABLE', 'my_table', 'ADD', 'COLUMN', 'new_col', 'INT', 'NOT', 'NULL']
+  // We need at least 5 parts: TABLE <name> ADD COLUMN <col_name> <col_type>
   if (fullCommandArgs.length < 5 || fullCommandArgs[0]?.toUpperCase() !== 'TABLE' || fullCommandArgs[2]?.toUpperCase() !== 'ADD' || fullCommandArgs[3]?.toUpperCase() !== 'COLUMN') {
     return { output: "Error: Invalid ALTER TABLE syntax. Expected: ALTER TABLE <table_name> ADD COLUMN <col_name> <col_type_definition>;" };
   }
   
   const tableName = fullCommandArgs[1];
   const columnName = fullCommandArgs[4];
+  // Column type definition can be multiple words (e.g., VARCHAR(255) NOT NULL)
   const columnTypeDefinition = fullCommandArgs.slice(5).join(' ').replace(/;/g, '');
 
 
@@ -766,3 +809,4 @@ export const handleRenameTable = (
 // TODO: Add ALTER DATABASE commands for password management if needed.
 // e.g., ALTER DATABASE db_name SET PASSWORD 'new_password';
 // e.g., ALTER DATABASE db_name REMOVE PASSWORD;
+

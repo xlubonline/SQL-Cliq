@@ -1,123 +1,8 @@
 {
   "Alosious": {
     "tables": {
-      "staff": {
-        "columnsDefinition": "id INT,     name VARCHAR(50),     department VARCHAR(50),     age INT",
-        "parsedColumns": [
-          {
-            "name": "id",
-            "type": "INT"
-          },
-          {
-            "name": "name",
-            "type": "VARCHAR(50)"
-          },
-          {
-            "name": "department",
-            "type": "VARCHAR(50)"
-          },
-          {
-            "name": "age",
-            "type": "INT"
-          }
-        ],
-        "data": [
-          {
-            "id": 101,
-            "name": "Thomas",
-            "department": "Sales",
-            "age": 30
-          },
-          {
-            "id": 102,
-            "name": "Mathew",
-            "department": "Marketing",
-            "age": 35
-          },
-          {
-            "id": 103,
-            "name": "Nandhu",
-            "department": "Accounts",
-            "age": 38
-          },
-          {
-            "id": 104,
-            "name": "Seema",
-            "department": "Sales",
-            "age": 36
-          },
-          {
-            "id": 105,
-            "name": "Bibin",
-            "department": "Loan",
-            "age": 29
-          }
-        ]
-      },
-      "employee": {
-        "columnsDefinition": "Emp_ID INT NOT NULL PRIMARY KEY,     Name VARCHAR(25) NOT NULL,     DOB DATE NOT NULL,     Designation VARCHAR(25) NOT NULL,     Salary INT NOT NULL",
-        "parsedColumns": [
-          {
-            "name": "Emp_ID",
-            "type": "INT NOT NULL PRIMARY KEY"
-          },
-          {
-            "name": "Name",
-            "type": "VARCHAR(25) NOT NULL"
-          },
-          {
-            "name": "DOB",
-            "type": "DATE NOT NULL"
-          },
-          {
-            "name": "Designation",
-            "type": "VARCHAR(25) NOT NULL"
-          },
-          {
-            "name": "Salary",
-            "type": "INT NOT NULL"
-          }
-        ],
-        "data": [
-          {
-            "Emp_ID": 1001,
-            "Name": "Miya",
-            "DOB": "1991-09-20",
-            "Designation": "Manager",
-            "Salary": 37000
-          },
-          {
-            "Emp_ID": 1002,
-            "Name": "Anu",
-            "DOB": "1992-06-11",
-            "Designation": "Accountant",
-            "Salary": 27000
-          },
-          {
-            "Emp_ID": 1003,
-            "Name": "Ajith",
-            "DOB": "1990-12-27",
-            "Designation": "Executive",
-            "Salary": 20000
-          },
-          {
-            "Emp_ID": 1004,
-            "Name": "Sanu",
-            "DOB": "1992-09-07",
-            "Designation": "Executive",
-            "Salary": 20000
-          },
-          {
-            "Emp_ID": 1005,
-            "Name": "Amal",
-            "DOB": "1991-03-15",
-            "Designation": "Accountant",
-            "Salary": 28000
-          }
-        ]
-      },
       "student": {
-        "columnsDefinition": "Rollno int not null,Name varchar(25) not null,Age int not null, Mark1 int not null,Mark2 int not null,Mark3 int not null,City varchar(25) not null,primary key(Rollno)",
+        "columnsDefinition": "Rollno int not null,Name varchar(25) not null,Age int not null, Mark1             int not null,Mark2 int not null,Mark3 int not null,City varchar(25) not null,primary  key(Rollno)",
         "parsedColumns": [
           {
             "name": "Rollno",
@@ -153,6 +38,69 @@
           }
         ],
         "data": []
+      },
+      "staff": {
+        "columnsDefinition": "Staff_ID int not null,Staff_Name varchar(25) not null,Department   varchar(25) not null, Age int not null check(Age>25), primary key(Staff_ID)",
+        "parsedColumns": [
+          {
+            "name": "Staff_ID",
+            "type": "INT NOT NULL"
+          },
+          {
+            "name": "Staff_Name",
+            "type": "VARCHAR(25) NOT NULL"
+          },
+          {
+            "name": "Department",
+            "type": "VARCHAR(25) NOT NULL"
+          },
+          {
+            "name": "Age",
+            "type": "INT NOT NULL CHECK(AGE>25)"
+          }
+        ],
+        "data": [
+          {
+            "Staff_ID": 101,
+            "Staff_Name": "Thomas",
+            "Department": "Sales",
+            "Age": 30
+          }
+        ]
+      },
+      "employee": {
+        "columnsDefinition": "Emp_ID int not null primary key,Name varchar(25) not null,DOB   date not null,Designation varchar(25) not null,Salary int  not null",
+        "parsedColumns": [
+          {
+            "name": "Emp_ID",
+            "type": "INT NOT NULL PRIMARY KEY"
+          },
+          {
+            "name": "Name",
+            "type": "VARCHAR(25) NOT NULL"
+          },
+          {
+            "name": "DOB",
+            "type": "DATE NOT NULL"
+          },
+          {
+            "name": "Designation",
+            "type": "VARCHAR(25) NOT NULL"
+          },
+          {
+            "name": "Salary",
+            "type": "INT  NOT NULL"
+          }
+        ],
+        "data": [
+          {
+            "Emp_ID": 1001,
+            "Name": "Miya",
+            "DOB": "20-09-1991",
+            "Designation": "Manager",
+            "Salary": 37000
+          }
+        ]
       }
     },
     "passwordHash": "3ec13115817a014a621e22b052993c86ed03ed69114f8413888f302d70e2d216"

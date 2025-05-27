@@ -148,7 +148,7 @@ export function SqlCliComponent() {
     const trimmedFullInputLine = fullInputLine.trim();
     if (!trimmedFullInputLine) return;
 
-    let currentPromptText = `${currentDatabase ? `${currentDatabase}>` : 'sql-cliq>'}`;
+    let currentPromptText = `${currentDatabase ? `${currentDatabase}$` : 'sql-cliq$'}`;
     if (awaitingPasswordForDb) {
       currentPromptText = `Password for ${awaitingPasswordForDb}:`;
     }
@@ -413,7 +413,7 @@ export function SqlCliComponent() {
     if (awaitingPasswordForDb) {
       return `Password for ${awaitingPasswordForDb}:`;
     }
-    return currentDatabase ? `${currentDatabase}>` : 'sql-cliq>';
+    return currentDatabase ? `${currentDatabase}$` : 'sql-cliq$';
   };
 
   if (!isMounted || isLoadingInitialData) {

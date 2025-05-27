@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --background: 220 20% 10%; /* Very dark blue/grey */
+    --background: 220 15% 5%; /* Very dark blue/grey */
     --foreground: 210 20% 85%; /* Light grey/off-white */
 
     --muted: 220 15% 25%;

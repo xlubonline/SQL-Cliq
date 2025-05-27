@@ -4,36 +4,36 @@
 
 @layer base {
   :root {
-    --background: 220 15% 5%; /* Very dark blue/grey */
-    --foreground: 210 20% 85%; /* Light grey/off-white */
+    --background: 220 10% 4%; /* Very dark, near black with a hint of blue */
+    --foreground: 200 15% 88%; /* Off-white, slightly cool tone, good contrast */
 
-    --muted: 220 15% 25%;
-    --muted-foreground: 210 15% 65%;
+    --muted: 220 10% 15%; /* Darker grey for muted elements */
+    --muted-foreground: 200 10% 60%; /* Lighter grey for muted text, still readable */
 
-    --popover: 220 20% 8%; /* Darker popup */
-    --popover-foreground: 210 20% 85%;
+    --popover: 220 10% 6%; /* Slightly lighter than background for popovers */
+    --popover-foreground: 200 15% 88%; /* Same as main foreground */
 
-    --card: 220 20% 12%; /* Slightly lighter than background for cards */
-    --card-foreground: 210 20% 85%;
+    --card: 220 10% 8%; /* Dark cards, a bit lighter than background */
+    --card-foreground: 200 15% 88%; /* Same as main foreground */
 
-    --border: 220 15% 30%; /* Subtle borders */
-    --input: 220 15% 20%; /* Dark input fields */
+    --border: 120 40% 25%; /* A muted, dark green border, thematic but not too loud */
+    --input: 220 10% 12%; /* Dark input fields, slightly lighter than card */
 
-    --primary: 130 60% 45%; /* Solid green for primary actions */
-    --primary-foreground: 220 10% 95%; /* Very light text on green buttons */
+    --primary: 130 65% 40%; /* Slightly deeper, richer green for primary actions */
+    --primary-foreground: 130 20% 95%; /* Very light, almost white text for primary buttons */
 
-    --secondary: 220 20% 18%; /* Darker elements */
-    --secondary-foreground: 210 15% 75%;
+    --secondary: 220 10% 20%; /* Darker grey for secondary elements */
+    --secondary-foreground: 200 10% 75%; /* Medium grey for secondary text */
 
-    --accent: 120 100% 50%; /* Classic bright "terminal" green */
-    --accent-foreground: 220 20% 10%; /* Dark text on bright green accent */
+    --accent: 120 100% 50%; /* Vibrant "matrix" green */
+    --accent-foreground: 120 100% 5%; /* Very dark green, for text on accent elements */
 
-    --destructive: 0 70% 50%; /* Vibrant red */
+    --destructive: 0 70% 45%; /* Slightly darker red */
     --destructive-foreground: 0 0% 98%;
 
-    --ring: 120 100% 60%; /* Brighter green for focus rings */
+    --ring: 120 100% 55%; /* Slightly lighter green for focus rings */
 
-    --radius: 0.3rem; /* Sharper corners */
+    --radius: 0.2rem; /* Sharper corners */
 
     --chart-1: 120 70% 60%;
     --chart-2: 150 60% 50%;
@@ -41,15 +41,15 @@
     --chart-4: 100 80% 70%;
     --chart-5: 140 75% 55%;
 
-    /* Sidebar variables matching hacker theme */
-    --sidebar-background: 220 20% 8%;
-    --sidebar-foreground: 210 15% 75%;
-    --sidebar-primary: 130 60% 45%;
-    --sidebar-primary-foreground: 220 10% 95%;
+    /* Sidebar variables matching the darker hacker theme */
+    --sidebar-background: 220 10% 6%;
+    --sidebar-foreground: 200 15% 80%;
+    --sidebar-primary: 130 65% 40%;
+    --sidebar-primary-foreground: 130 20% 95%;
     --sidebar-accent: 120 100% 50%;
-    --sidebar-accent-foreground: 220 20% 10%;
-    --sidebar-border: 220 15% 25%;
-    --sidebar-ring: 120 100% 60%;
+    --sidebar-accent-foreground: 120 100% 5%;
+    --sidebar-border: 120 40% 20%;
+    --sidebar-ring: 120 100% 55%;
   }
 
 }

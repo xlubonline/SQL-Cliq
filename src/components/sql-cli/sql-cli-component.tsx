@@ -458,12 +458,12 @@ export function SqlCliComponent() {
                   <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>
                 </div>
               ) : entry.type === 'output' || entry.type === 'error' ? (
-                // Apply ">> " prefix for output and error types
+                // Apply "»›› " prefix for output and error types
                 Array.isArray(entry.content) ? 
-                  entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{`>> ${line}`}</pre>) :
-                  <pre className="whitespace-pre-wrap break-words">{`>> ${entry.content}`}</pre>
+                  entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{`»›› ${line}`}</pre>) :
+                  <pre className="whitespace-pre-wrap break-words">{`»›› ${entry.content}`}</pre>
               ) : (entry.type === 'assist-input' || entry.type === 'assist-output') ? (
-                // Render assist types without ">> " prefix
+                // Render assist types without "»›› " prefix
                 Array.isArray(entry.content) ? 
                   entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{line}</pre>) :
                   <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>

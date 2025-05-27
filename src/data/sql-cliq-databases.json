@@ -1,40 +1,160 @@
 {
-  "student": {
+  "Alosious": {
     "tables": {
-      "EMPLOYEE": {
-        "columnsDefinition": "empId INTEGER PRIMARY KEY,   name TEXT NOT NULL,   dept TEXT NOT NULL",
+      "staff": {
+        "columnsDefinition": "id INT,     name VARCHAR(50),     department VARCHAR(50),     age INT",
         "parsedColumns": [
           {
-            "name": "empId",
-            "type": "INTEGER PRIMARY KEY"
+            "name": "id",
+            "type": "INT"
           },
           {
             "name": "name",
-            "type": "TEXT NOT NULL"
+            "type": "VARCHAR(50)"
           },
           {
-            "name": "dept",
-            "type": "TEXT NOT NULL"
+            "name": "department",
+            "type": "VARCHAR(50)"
+          },
+          {
+            "name": "age",
+            "type": "INT"
           }
         ],
         "data": [
           {
-            "empId": 1,
-            "name": "Clark",
-            "dept": "Sales"
+            "id": 101,
+            "name": "Thomas",
+            "department": "Sales",
+            "age": 30
           },
           {
-            "empId": 2,
-            "name": "Dave",
-            "dept": "Accounting"
+            "id": 102,
+            "name": "Mathew",
+            "department": "Marketing",
+            "age": 35
           },
           {
-            "empId": 3,
-            "name": "Myra",
-            "dept": "Sales"
+            "id": 103,
+            "name": "Nandhu",
+            "department": "Accounts",
+            "age": 38
+          },
+          {
+            "id": 104,
+            "name": "Seema",
+            "department": "Sales",
+            "age": 36
+          },
+          {
+            "id": 105,
+            "name": "Bibin",
+            "department": "Loan",
+            "age": 29
           }
         ]
+      },
+      "employee": {
+        "columnsDefinition": "Emp_ID INT NOT NULL PRIMARY KEY,     Name VARCHAR(25) NOT NULL,     DOB DATE NOT NULL,     Designation VARCHAR(25) NOT NULL,     Salary INT NOT NULL",
+        "parsedColumns": [
+          {
+            "name": "Emp_ID",
+            "type": "INT NOT NULL PRIMARY KEY"
+          },
+          {
+            "name": "Name",
+            "type": "VARCHAR(25) NOT NULL"
+          },
+          {
+            "name": "DOB",
+            "type": "DATE NOT NULL"
+          },
+          {
+            "name": "Designation",
+            "type": "VARCHAR(25) NOT NULL"
+          },
+          {
+            "name": "Salary",
+            "type": "INT NOT NULL"
+          }
+        ],
+        "data": [
+          {
+            "Emp_ID": 1001,
+            "Name": "Miya",
+            "DOB": "1991-09-20",
+            "Designation": "Manager",
+            "Salary": 37000
+          },
+          {
+            "Emp_ID": 1002,
+            "Name": "Anu",
+            "DOB": "1992-06-11",
+            "Designation": "Accountant",
+            "Salary": 27000
+          },
+          {
+            "Emp_ID": 1003,
+            "Name": "Ajith",
+            "DOB": "1990-12-27",
+            "Designation": "Executive",
+            "Salary": 20000
+          },
+          {
+            "Emp_ID": 1004,
+            "Name": "Sanu",
+            "DOB": "1992-09-07",
+            "Designation": "Executive",
+            "Salary": 20000
+          },
+          {
+            "Emp_ID": 1005,
+            "Name": "Amal",
+            "DOB": "1991-03-15",
+            "Designation": "Accountant",
+            "Salary": 28000
+          }
+        ]
+      },
+      "student": {
+        "columnsDefinition": "Rollno int not null,Name varchar(25) not null,Age int not null, Mark1 int not null,Mark2 int not null,Mark3 int not null,City varchar(25) not null,primary key(Rollno)",
+        "parsedColumns": [
+          {
+            "name": "Rollno",
+            "type": "INT NOT NULL"
+          },
+          {
+            "name": "Name",
+            "type": "VARCHAR(25) NOT NULL"
+          },
+          {
+            "name": "Age",
+            "type": "INT NOT NULL"
+          },
+          {
+            "name": "Mark1",
+            "type": "INT NOT NULL"
+          },
+          {
+            "name": "Mark2",
+            "type": "INT NOT NULL"
+          },
+          {
+            "name": "Mark3",
+            "type": "INT NOT NULL"
+          },
+          {
+            "name": "City",
+            "type": "VARCHAR(25) NOT NULL"
+          },
+          {
+            "name": "primary",
+            "type": "KEY(ROLLNO)"
+          }
+        ],
+        "data": []
       }
-    }
+    },
+    "passwordHash": "3ec13115817a014a621e22b052993c86ed03ed69114f8413888f302d70e2d216"
   }
 }

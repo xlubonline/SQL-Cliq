@@ -56,18 +56,39 @@ const formatTableOutput = (headers: string[], rows: string[][]): string[] => {
 export const parseColumnDefinitions = (definitionStr: string): ColumnDefinition[] => {
   if (!definitionStr) return [];
   const columns: ColumnDefinition[] = [];
+  // Regex to split by comma, but not if comma is inside parentheses (e.g., for VARCHAR(255))
   const defs = definitionStr.split(/,(?![^()]*\))/g); 
   
+  const constraintKeywords = ['PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE', 'CHECK', 'CONSTRAINT'];
+
   defs.forEach(def => {
     const trimmedDef = def.trim();
     if (!trimmedDef) return;
-    const parts = trimmedDef.match(/^(\w+)\s+(.*)$/); 
+
+    // Check if this definition part starts with a known table-level constraint keyword
+    const isTableConstraint = constraintKeywords.some(keyword => 
+      trimmedDef.toUpperCase().startsWith(keyword)
+    );
+
+    if (isTableConstraint) {
+      return; // Skip table-level constraints for parsedColumns list used by INSERT value counting
+    }
+
+    // Attempt to parse as 'column_name type_definition'
+    // This regex captures a valid SQL-like identifier as name, and the rest as type.
+    const parts = trimmedDef.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s+(.+)$/i); 
     if (parts && parts.length === 3) {
+      // parts[1] is column name, parts[2] is type and any inline constraints
       columns.push({ name: parts[1].trim(), type: parts[2].trim().toUpperCase() });
+    } else {
+      // This might happen with definitions that are not simple 'name type' or are malformed.
+      // For this CLI, we'll ignore them if they don't fit and weren't caught as table constraints.
+      console.warn(`Could not parse "${trimmedDef}" as a column definition (name type). It will be ignored for data column counting.`);
     }
   });
   return columns;
 };
+
 
 const isValidIdentifier = (name: string): boolean => {
   return /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name);
@@ -190,7 +211,15 @@ export const handleCreateTable = (
 
   const parsedColumns = parseColumnDefinitions(columnsDefinitionStr.trim());
   if (parsedColumns.length === 0 && columnsDefinitionStr.trim() !== "") { 
-    return { newDatabases: databases, output: `Error: Could not parse column definitions for table '${tableName}'. Ensure format is 'colName TYPE, ...'. Problem with: "${columnsDefinitionStr.trim()}"`};
+    // Check if the definition string only contained constraints or was genuinely empty for columns
+    const onlyConstraintsOrEmpty = columnsDefinitionStr.trim().split(/,(?![^()]*\))/g)
+        .every(def => {
+            const trimmedDef = def.trim().toUpperCase();
+            return !trimmedDef || ['PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE', 'CHECK', 'CONSTRAINT'].some(kw => trimmedDef.startsWith(kw));
+        });
+    if (!onlyConstraintsOrEmpty) {
+      return { newDatabases: databases, output: `Error: Could not parse any valid column definitions for table '${tableName}'. Ensure format is 'colName TYPE, ...'. Problem with: "${columnsDefinitionStr.trim()}"`};
+    }
   }
   if (parsedColumns.some(pc => !pc.name || !pc.type)) {
      return { newDatabases: databases, output: `Error: Invalid column definition syntax in '${columnsDefinitionStr.trim()}'. Each column must have a name and a type.` };
@@ -245,6 +274,7 @@ export const handleDescribeTable = (
   }
   
   const headers = ['Field', 'Type'];
+  // parsedColumns should now correctly list only data columns
   const rows = table.parsedColumns.map(col => [col.name, col.type.toUpperCase()]);
   
   if (rows.length === 0) {
@@ -278,7 +308,10 @@ export const handleInsertData = (
   const values = valuesStr.split(',').map(v => {
     const trimmedV = v.trim();
     if (trimmedV.toUpperCase() === 'NULL') return null;
-    if ((trimmedV.startsWith("'") && trimmedV.endsWith("'")) || (trimmedV.startsWith('"') && trimmedV.endsWith('"'))) {
+    // Handle smart quotes and standard quotes for strings
+    if ((trimmedV.startsWith("'") && trimmedV.endsWith("'")) || 
+        (trimmedV.startsWith('"') && trimmedV.endsWith('"')) ||
+        (trimmedV.startsWith("’") && trimmedV.endsWith("’")) ) {
       return trimmedV.substring(1, trimmedV.length - 1);
     }
     return trimmedV;
@@ -297,7 +330,7 @@ export const handleInsertData = (
         targetColumns.push(colDef);
     }
   } else {
-    targetColumns = table.parsedColumns;
+    targetColumns = table.parsedColumns; // This list should now be correct
   }
   
   if (values.length !== targetColumns.length) {
@@ -331,6 +364,7 @@ export const handleInsertData = (
         }
         value = num;
       }
+      // For VARCHAR, TEXT, etc., the value is already a string or has been converted.
       newRow[colDef.name] = value;
     }
   } catch (e: any) {
@@ -362,16 +396,19 @@ const parseWhereClause = (whereClauseStr: string | undefined, table: TableSchema
     return () => true; 
   }
 
-  const whereMatch = whereClauseStr.match(/(\w+)\s*=\s*(?:'([^']*)'|"([^"]*)"|(\S+))/);
+  // Match 'column = value' or 'column = "text value"' or 'column = 'text value''
+  // Handles smart quotes as well
+  const whereMatch = whereClauseStr.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:'([^']*)'|"([^"]*)"|’([^’]*)’|(\S+))/i);
+
   if (whereMatch) {
-    const [, colName, strValueSingleQuote, strValueDoubleQuote, unquotedValue] = whereMatch;
+    const [, colName, strValueSingleQuote, strValueDoubleQuote, strValueSmartQuote, unquotedValue] = whereMatch;
     
     const colDef = table.parsedColumns.find(c => c.name.toLowerCase() === colName.toLowerCase());
     if (!colDef) {
       return `Error: Column '${colName}' not found in WHERE clause for table. Available columns: ${table.parsedColumns.map(c=>c.name).join(', ')}.`;
     }
 
-    let filterValueStr = strValueSingleQuote ?? strValueDoubleQuote ?? unquotedValue;
+    let filterValueStr = strValueSingleQuote ?? strValueDoubleQuote ?? strValueSmartQuote ?? unquotedValue;
     let filterValue: any;
 
     if (filterValueStr.toUpperCase() === 'NULL') {
@@ -395,7 +432,14 @@ const parseWhereClause = (whereClauseStr: string | undefined, table: TableSchema
     
     return (row: Record<string, any>) => {
       const rowValue = row[colDef.name];
-      return rowValue === filterValue;
+      // Type-aware comparison for numbers, case-insensitive for strings
+      if (typeof filterValue === 'number' && typeof rowValue === 'number') {
+        return rowValue === filterValue;
+      }
+      if (typeof filterValue === 'string' && typeof rowValue === 'string') {
+        return rowValue.toLowerCase() === filterValue.toLowerCase();
+      }
+      return rowValue === filterValue; // Fallback for other types or null
     };
   } else {
     return `Error: Unsupported WHERE clause format. Use 'column = value' or 'column = "text value"' or column = 'text value'.`;
@@ -490,7 +534,10 @@ export const handleSelectData = (
   
   const headers = requestedColumns.filter(rcName => 
     table.parsedColumns.some(pc => pc.name.toLowerCase() === rcName.toLowerCase())
-  );
+  ).map(rcName => { // Ensure headers retain original casing from parsedColumns
+    const foundCol = table.parsedColumns.find(pc => pc.name.toLowerCase() === rcName.toLowerCase());
+    return foundCol ? foundCol.name : rcName;
+  });
   
   if (headers.length === 0 && columnsStr.trim() !== '*') {
     return { output: `Error: None of the requested columns (${columnsStr}) found in table '${tableName}'. Available: ${table.parsedColumns.map(c => c.name).join(', ')}`};
@@ -498,7 +545,7 @@ export const handleSelectData = (
   
   const finalRows = processedData.map(row => 
     headers.map(header => {
-      const val = row[header];
+      const val = row[header]; // Use the correctly cased header
       return val === null ? 'NULL' : String(val);
     }) 
   );
@@ -656,11 +703,11 @@ export const handleUpdateData = (
   const setParts = setClauseStr.split(',').map(p => p.trim());
 
   for (const part of setParts) {
-    const assignMatch = part.match(/(\w+)\s*=\s*(?:'([^']*)'|"([^"]*)"|(\S+))/);
+    const assignMatch = part.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(?:'([^']*)'|"([^"]*)"|’([^’]*)’|(\S+))/i);
     if (!assignMatch) {
       return { output: `Error: Invalid SET assignment: '${part}'. Expected format: column = value.` };
     }
-    const [, columnName, strValueSingle, strValueDouble, unquotedValue] = assignMatch;
+    const [, columnName, strValueSingle, strValueDouble, strValueSmart, unquotedValue] = assignMatch;
     
 
     const colDef = table.parsedColumns.find(c => c.name.toLowerCase() === columnName.toLowerCase());
@@ -668,7 +715,7 @@ export const handleUpdateData = (
       return { output: `Error: Column '${columnName}' not found in table '${tableName}' for SET clause.` };
     }
     
-    let valueStr = strValueSingle ?? strValueDouble ?? unquotedValue;
+    let valueStr = strValueSingle ?? strValueDouble ?? strValueSmart ?? unquotedValue;
     let value: any;
 
     if (valueStr.toUpperCase() === 'NULL') {
@@ -758,7 +805,7 @@ export const handleAlterTableAddColumn = (
 
   const newColumnDefParts = parseColumnDefinitions(`${columnName} ${columnTypeDefinition}`);
   if (newColumnDefParts.length === 0 || !newColumnDefParts[0].name || !newColumnDefParts[0].type) {
-      return { output: `Error: Could not parse new column definition: '${columnName} ${columnTypeDefinition}'.`};
+      return { output: `Error: Could not parse new column definition: '${columnName} ${columnTypeDefinition}'. Ensure it is in 'name TYPE' format.`};
   }
   const newColumnDef = newColumnDefParts[0];
 
@@ -810,3 +857,5 @@ export const handleRenameTable = (
 // e.g., ALTER DATABASE db_name SET PASSWORD 'new_password';
 // e.g., ALTER DATABASE db_name REMOVE PASSWORD;
 
+
+    

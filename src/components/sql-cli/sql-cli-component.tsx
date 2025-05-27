@@ -273,7 +273,7 @@ export function SqlCliComponent() {
           break;
         case 'SELECT':
           result = handleSelectData(commandStr, currentDatabase, tempDatabases);
-          addHistoryEntry( (typeof result.output === 'string' && result.output.startsWith('Error:')) ? 'error' : 'output', result.output);
+          addHistoryEntry( (typeof result.output === 'string' && result.output.startsWith('Error:')) || (Array.isArray(result.output) && typeof result.output[0] === 'string' && result.output[0].startsWith('Error:')) ? 'error' : 'output', result.output);
           break;
         case 'DROP':
           if (args[0]?.toUpperCase() === 'TABLE' && args[1]) {
@@ -418,7 +418,7 @@ export function SqlCliComponent() {
 
   if (!isMounted || isLoadingInitialData) {
     return (
-      <div className="flex flex-col h-full items-center justify-center bg-background p-4 overflow-hidden">
+      <div className="flex flex-col h-full items-center justify-center bg-card p-4 overflow-hidden rounded-lg border border-border shadow-md">
         <Terminal className="h-16 w-16 text-accent animate-pulse" />
         <p className="text-foreground mt-4">
           {isLoadingInitialData ? "Loading database from server..." : "Initializing SQL Cliq..."}
@@ -428,8 +428,8 @@ export function SqlCliComponent() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-background text-foreground font-mono overflow-hidden" onClick={() => inputRef.current?.focus()}>
-      <header className="p-2 md:p-4 flex items-center gap-2 flex-shrink-0 bg-background border-b border-border sticky top-0 z-10">
+    <div className="flex flex-col h-full bg-card text-foreground font-mono overflow-hidden rounded-lg border border-border shadow-md" onClick={() => inputRef.current?.focus()}>
+      <header className="p-3 md:p-4 flex items-center gap-2 flex-shrink-0 bg-background border-b border-border sticky top-0 z-10">
         <Terminal className="h-6 w-6 text-accent" />
         <h1 className="text-xl font-semibold text-foreground">SQL Cliq</h1>
         {isSavingData && (
@@ -443,7 +443,7 @@ export function SqlCliComponent() {
         )}
       </header>
       
-      <ScrollArea className="flex-grow w-full bg-input/30 shadow-inner min-h-0" ref={scrollAreaRef}>
+      <ScrollArea className="flex-grow w-full bg-input/30 shadow-inner min-h-0 border border-border rounded-md m-2 md:m-4" ref={scrollAreaRef}>
         <div className="text-sm md:text-base p-3 md:p-4">
           {history.map(entry => (
             <div key={entry.id} className={`mb-1.5 ${
@@ -479,7 +479,7 @@ export function SqlCliComponent() {
         </div>
       </ScrollArea>
 
-      <form onSubmit={handleSubmit} className="p-2 md:p-4 flex items-center gap-2 flex-shrink-0 bg-background border-t border-border">
+      <form onSubmit={handleSubmit} className="p-3 md:p-4 flex items-center gap-2 flex-shrink-0 bg-background border-t border-border">
         <span className="text-accent text-sm md:text-base">
           {getPromptText()}
         </span>
@@ -502,3 +502,4 @@ export function SqlCliComponent() {
     </div>
   );
 }
+

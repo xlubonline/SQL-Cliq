@@ -413,7 +413,7 @@ export function SqlCliComponent() {
     if (awaitingPasswordForDb) {
       return `Password for ${awaitingPasswordForDb}:`;
     }
-    return currentDatabase ? `${currentDatabase}$` : 'DOTSER@sql-cliq $';
+    return currentDatabase ? `${currentDatabase}$` : '@sql-cliq $';
   };
 
   if (!isMounted || isLoadingInitialData) {

@@ -1,5 +1,17 @@
 
 import type { DatabasesStructure, TableSchema, DatabaseSchema, ColumnDefinition } from './types';
+import crypto from 'crypto';
+
+// Password Hashing Utilities
+function hashPassword(password: string): string {
+  if (!password) return ''; // Should not happen if validated before
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  if (!password || !storedHash) return false;
+  return hashPassword(password) === storedHash;
+}
 
 export const parseCommand = (command: string): { commandName: string; args: string[] } => {
   const parts = command.trim().split(/\s+/);
@@ -22,10 +34,7 @@ const formatTableOutput = (headers: string[], rows: string[][]): string[] => {
 
 
   if (rows.length === 0) {
-    // This case should ideally be caught by the specific checks above for tables/databases.
-    // If it reaches here with headers, it means there are headers but no data.
-    // For DESCRIBE type outputs, this means no columns.
-    if (headers.length > 0 && headers[0] === 'Field') { // Typical for DESCRIBE
+    if (headers.length > 0 && headers[0] === 'Field') { 
         return ["Table has no columns or definition is malformed."];
     }
     return ["Empty set"];
@@ -44,28 +53,17 @@ const formatTableOutput = (headers: string[], rows: string[][]): string[] => {
   return [separator, formatRow(headers), separator, ...rows.map(formatRow), separator];
 };
 
-// Helper to parse column definitions string like "id INT, name VARCHAR(100)"
-// Or a single definition like "age INT NOT NULL"
 export const parseColumnDefinitions = (definitionStr: string): ColumnDefinition[] => {
   if (!definitionStr) return [];
   const columns: ColumnDefinition[] = [];
-  // Split by comma, unless the comma is inside parentheses (e.g., VARCHAR(10,2))
-  // This regex is a simplification and might not cover all SQL data type complexities.
   const defs = definitionStr.split(/,(?![^()]*\))/g); 
   
   defs.forEach(def => {
     const trimmedDef = def.trim();
     if (!trimmedDef) return;
-    
-    // Matches "name TYPE" or "name TYPE constraint1 constraint2 ..."
-    // It captures the first word as name, and the rest as type.
     const parts = trimmedDef.match(/^(\w+)\s+(.*)$/); 
     if (parts && parts.length === 3) {
       columns.push({ name: parts[1].trim(), type: parts[2].trim().toUpperCase() });
-    } else if (!trimmedDef.includes(" ")) {
-      // Handle case where it might just be a name (though invalid SQL for a column def)
-      // For robustness, or decide to error out. For now, let's assume it's an error if no type.
-      // This path shouldn't be hit with valid SQL column definitions.
     }
   });
   return columns;
@@ -77,17 +75,46 @@ const isValidIdentifier = (name: string): boolean => {
 
 
 export const handleCreateDatabase = (
-  dbName: string,
+  fullCommand: string, // Changed to full command string
   databases: DatabasesStructure
 ): { newDatabases: DatabasesStructure; output: string } => {
+  // Regex to match CREATE DATABASE db_name [WITH PASSWORD 'password_value']
+  const createDbRegex = /^CREATE\s+DATABASE\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+WITH\s+PASSWORD\s+'([^']*)')?\s*;?$/i;
+  const match = fullCommand.match(createDbRegex);
+
+  if (!match) {
+    return { newDatabases: databases, output: "Error: Invalid CREATE DATABASE syntax. Expected: CREATE DATABASE <db_name> [WITH PASSWORD '<password>'];" };
+  }
+
+  const dbName = match[1];
+  const password = match[2]; // This will be undefined if password clause is not present
+
   if (!dbName || !isValidIdentifier(dbName)) {
     return { newDatabases: databases, output: `Error: Invalid database name '${dbName}'. Names must start with a letter or underscore, followed by letters, numbers, or underscores.` };
   }
   if (databases[dbName]) {
     return { newDatabases: databases, output: `Error: Database '${dbName}' already exists.` };
   }
-  const newDatabases = { ...databases, [dbName]: { tables: {} } };
-  return { newDatabases, output: `Database '${dbName}' created successfully.` };
+
+  let passwordHash: string | undefined = undefined;
+  if (password) {
+    if (password.length < 4) { // Basic validation
+        return { newDatabases: databases, output: `Error: Password for database '${dbName}' must be at least 4 characters long.` };
+    }
+    passwordHash = hashPassword(password);
+  }
+
+  const newDbSchema: DatabaseSchema = { tables: {} };
+  if (passwordHash) {
+    newDbSchema.passwordHash = passwordHash;
+  }
+
+  const newDatabases = { ...databases, [dbName]: newDbSchema };
+  let outputMessage = `Database '${dbName}' created successfully.`;
+  if (passwordHash) {
+    outputMessage += " It is password protected.";
+  }
+  return { newDatabases, output: outputMessage };
 };
 
 export const handleShowDatabases = (databases: DatabasesStructure): string[] => {
@@ -101,12 +128,41 @@ export const handleShowDatabases = (databases: DatabasesStructure): string[] => 
 export const handleUseDatabase = (
   dbName: string,
   databases: DatabasesStructure
-): { newCurrentDb: string | null; output: string } => {
+): { newCurrentDb?: string | null; output: string | string[]; requiresPasswordInput?: boolean; dbToAuth?: string } => {
   if (!databases[dbName]) {
-    return { newCurrentDb: null, output: `Error: Unknown database '${dbName}'.` };
+    return { output: `Error: Unknown database '${dbName}'.` };
   }
+  
+  const dbSchema = databases[dbName];
+  if (dbSchema.passwordHash) {
+    return { 
+      output: [`Password required for database '${dbName}'.`, "Enter password on the next line:"], 
+      requiresPasswordInput: true, 
+      dbToAuth: dbName 
+    };
+  }
+
   return { newCurrentDb: dbName, output: `Database changed to '${dbName}'.` };
 };
+
+export const handlePasswordAttempt = (
+  dbName: string,
+  enteredPassword: string,
+  databases: DatabasesStructure
+): { newCurrentDb: string | null; output: string } => {
+  const dbSchema = databases[dbName];
+  if (!dbSchema || !dbSchema.passwordHash) {
+    // This case should not be reached if logic is correct, as USE would have switched already
+    return { newCurrentDb: null, output: `Error: Database '${dbName}' is not password protected or does not exist.` };
+  }
+
+  if (verifyPassword(enteredPassword, dbSchema.passwordHash)) {
+    return { newCurrentDb: dbName, output: `Access granted. Database changed to '${dbName}'.` };
+  } else {
+    return { newCurrentDb: null, output: `Error: Invalid password for database '${dbName}'. Access denied.` };
+  }
+};
+
 
 export const handleCreateTable = (
   fullCommand: string,
@@ -133,7 +189,7 @@ export const handleCreateTable = (
   }
 
   const parsedColumns = parseColumnDefinitions(columnsDefinitionStr.trim());
-  if (parsedColumns.length === 0 && columnsDefinitionStr.trim() !== "") { // Check if def string was not empty but parsing failed
+  if (parsedColumns.length === 0 && columnsDefinitionStr.trim() !== "") { 
     return { newDatabases: databases, output: `Error: Could not parse column definitions for table '${tableName}'. Ensure format is 'colName TYPE, ...'. Problem with: "${columnsDefinitionStr.trim()}"`};
   }
   if (parsedColumns.some(pc => !pc.name || !pc.type)) {
@@ -192,7 +248,7 @@ export const handleDescribeTable = (
   const rows = table.parsedColumns.map(col => [col.name, col.type.toUpperCase()]);
   
   if (rows.length === 0) {
-     return formatTableOutput(headers, []); // Uses the new empty set logic in formatTableOutput
+     return formatTableOutput(headers, []); 
   }
   
   return formatTableOutput(headers, rows);
@@ -221,9 +277,7 @@ export const handleInsertData = (
 
   const values = valuesStr.split(',').map(v => {
     const trimmedV = v.trim();
-    // Handle explicit NULL
     if (trimmedV.toUpperCase() === 'NULL') return null;
-    // Remove leading/trailing single or double quotes
     if ((trimmedV.startsWith("'") && trimmedV.endsWith("'")) || (trimmedV.startsWith('"') && trimmedV.endsWith('"'))) {
       return trimmedV.substring(1, trimmedV.length - 1);
     }
@@ -256,7 +310,7 @@ export const handleInsertData = (
       const colDef = targetColumns[i];
       let value: any = values[i];
 
-      if (value === null) { // Already handled NULL string above
+      if (value === null) { 
         newRow[colDef.name] = null;
         continue;
       }
@@ -277,7 +331,6 @@ export const handleInsertData = (
         }
         value = num;
       }
-      // For VARCHAR, TEXT, etc., value is already a string (or became null)
       newRow[colDef.name] = value;
     }
   } catch (e: any) {
@@ -335,15 +388,13 @@ const parseWhereClause = (whereClauseStr: string | undefined, table: TableSchema
           if (isNaN(filterValue)) {
              return `Error: Invalid float for comparison in WHERE clause for column '${colName}'. Value was '${filterValueStr}'.`;
           }
-      } else { // String or other types
-        filterValue = filterValueStr; // Already unquoted if it was quoted
+      } else { 
+        filterValue = filterValueStr; 
       }
     }
     
     return (row: Record<string, any>) => {
       const rowValue = row[colDef.name];
-      // Handle type sensitivity for comparison if necessary, e.g., 123 vs '123'
-      // For now, a direct comparison, which might be fine if data is stored with correct types.
       return rowValue === filterValue;
     };
   } else {
@@ -381,7 +432,6 @@ export const handleSelectData = (
 
   let processedData = table.data.filter(filterFn);
 
-  // Handle ORDER BY
   if (orderByColumnName) {
     const orderByColumnFound = table.parsedColumns.find(c => c.name.toLowerCase() === orderByColumnName.toLowerCase());
     if (!orderByColumnFound) {
@@ -420,15 +470,13 @@ export const handleSelectData = (
     });
   }
 
-  // Handle LIMIT
   if (limitCountStr) {
     const limit = parseInt(limitCountStr, 10);
     if (!isNaN(limit) && limit > 0) {
       processedData = processedData.slice(0, limit);
     } else if (!isNaN(limit) && limit === 0) {
-      processedData = []; // Limit 0 means no rows
+      processedData = []; 
     }
-    // Ignore invalid limit (negative or not a number)
   }
 
 
@@ -485,6 +533,11 @@ export const handleDropDatabase = (
   if (!databases[dbNameToDrop]) {
     return { output: `Error: Database '${dbNameToDrop}' does not exist.` };
   }
+   // Cannot drop a password-protected database without further auth - simple restriction for now
+  if (databases[dbNameToDrop].passwordHash && currentDbName !== dbNameToDrop) {
+    return { output: `Error: Database '${dbNameToDrop}' is password protected. USE the database first to manage it.` };
+  }
+
 
   const newDatabases = JSON.parse(JSON.stringify(databases)); 
   delete newDatabases[dbNameToDrop];
@@ -588,8 +641,8 @@ export const handleUpdateData = (
         } else if (colTypeUpper.startsWith('FLOAT') || colTypeUpper.startsWith('DOUBLE') || colTypeUpper.startsWith('REAL')) {
           value = parseFloat(valueStr);
           if (isNaN(value)) return { output: `Error: Invalid float value '${valueStr}' for column '${columnName}'.` };
-        } else { // VARCHAR, TEXT, CHAR etc.
-           value = valueStr; // Already unquoted if necessary by regex
+        } else { 
+           value = valueStr; 
         }
     }
     setAssignments.push({ column: colDef.name, value });
@@ -624,7 +677,7 @@ export const handleUpdateData = (
 };
 
 export const handleAlterTableAddColumn = (
-  fullCommandArgs: string[], // e.g. ['TABLE', 'mytable', 'ADD', 'COLUMN', 'new_col', 'VARCHAR(50)', 'NOT', 'NULL']
+  fullCommandArgs: string[], 
   currentDbName: string | null,
   databases: DatabasesStructure
 ): { newDatabases?: DatabasesStructure; output: string } => {
@@ -632,8 +685,6 @@ export const handleAlterTableAddColumn = (
     return { output: "Error: No database selected or database does not exist." };
   }
 
-  // Expected: ALTER TABLE table_name ADD COLUMN column_name column_type_definition;
-  // args from parseCommand: [TABLE, table_name, ADD, COLUMN, col_name, col_type_part1, col_type_part2, ...]
   if (fullCommandArgs.length < 5 || fullCommandArgs[0]?.toUpperCase() !== 'TABLE' || fullCommandArgs[2]?.toUpperCase() !== 'ADD' || fullCommandArgs[3]?.toUpperCase() !== 'COLUMN') {
     return { output: "Error: Invalid ALTER TABLE syntax. Expected: ALTER TABLE <table_name> ADD COLUMN <col_name> <col_type_definition>;" };
   }
@@ -677,7 +728,7 @@ export const handleAlterTableAddColumn = (
     : `${newColumnDef.name} ${newColumnDef.type}`;
   
   tableToUpdate.data.forEach((row: Record<string, any>) => {
-    row[newColumnDef.name] = null; // Add new column with NULL value to existing rows
+    row[newColumnDef.name] = null; 
   });
 
   return { newDatabases, output: `Column '${columnName}' added to table '${tableName}'.` };
@@ -704,10 +755,14 @@ export const handleRenameTable = (
     return { output: `Error: Invalid new table name '${newTableName}'. Names must start with a letter or underscore, followed by letters, numbers, or underscores.` };
   }
 
-  const newDatabases = JSON.parse(JSON.stringify(databases)); // Deep copy
+  const newDatabases = JSON.parse(JSON.stringify(databases)); 
   const tableToRename = newDatabases[currentDbName].tables[oldTableName];
   delete newDatabases[currentDbName].tables[oldTableName];
   newDatabases[currentDbName].tables[newTableName] = tableToRename;
 
   return { newDatabases, output: `Table '${oldTableName}' renamed to '${newTableName}' successfully.` };
 };
+
+// TODO: Add ALTER DATABASE commands for password management if needed.
+// e.g., ALTER DATABASE db_name SET PASSWORD 'new_password';
+// e.g., ALTER DATABASE db_name REMOVE PASSWORD;

@@ -14,7 +14,8 @@ import {
   parseCommand, 
   handleCreateDatabase, 
   handleShowDatabases, 
-  handleUseDatabase, 
+  handleUseDatabase,
+  handlePasswordAttempt,
   handleCreateTable,
   handleShowTables,
   handleDescribeTable,
@@ -28,7 +29,6 @@ import {
   handleRenameTable
 } from './utils';
 
-// Client-side UI state keys for localStorage
 const SQL_CLIQ_CURRENT_DB_KEY = 'sqlCliqCurrentDb_v2'; 
 const SQL_CLIQ_HISTORY_KEY = 'sqlCliqHistory_v2';     
 
@@ -41,6 +41,7 @@ export function SqlCliComponent() {
   const [isLoadingAssistant, setIsLoadingAssistant] = useState(false);
   const [isSavingData, setIsSavingData] = useState(false);
   const [isLoadingInitialData, setIsLoadingInitialData] = useState(true);
+  const [awaitingPasswordForDb, setAwaitingPasswordForDb] = useState<string | null>(null);
 
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -56,6 +57,7 @@ export function SqlCliComponent() {
     "Type 'ASSIST \"your question\"' for AI help.",
     "Type 'HELP;' for a list of basic commands.",
     "Database data is now saved on the server (simulated).",
+    "Databases can be password protected: CREATE DATABASE name WITH PASSWORD 'secret';",
   ];
 
 
@@ -66,7 +68,6 @@ export function SqlCliComponent() {
       const savedHistory = localStorage.getItem(SQL_CLIQ_HISTORY_KEY);
       if (savedHistory) {
         const parsedHistory = JSON.parse(savedHistory);
-        // Ensure history isn't empty after parsing, could happen if localStorage has "[]"
         if (parsedHistory.length > 0) {
             setHistory(parsedHistory);
         } else {
@@ -127,7 +128,7 @@ export function SqlCliComponent() {
       if (viewport) viewport.scrollTop = viewport.scrollHeight;
     }
     inputRef.current?.focus();
-  }, [history, isLoadingAssistant, isSavingData]);
+  }, [history, isLoadingAssistant, isSavingData, awaitingPasswordForDb]);
 
   const saveDatabasesToServer = async (updatedDatabases: DatabasesStructure) => {
     setIsSavingData(true);
@@ -147,14 +148,30 @@ export function SqlCliComponent() {
     const trimmedFullInputLine = fullInputLine.trim();
     if (!trimmedFullInputLine) return;
 
-    const currentPrompt = `${currentDatabase ? `${currentDatabase}>` : 'sql-cliq>'}`;
-    
-    if (trimmedFullInputLine.startsWith('--')) {
-      addHistoryEntry('comment', trimmedFullInputLine, currentPrompt);
-      return;
+    let currentPromptText = `${currentDatabase ? `${currentDatabase}>` : 'sql-cliq>'}`;
+    if (awaitingPasswordForDb) {
+      currentPromptText = `Password for ${awaitingPasswordForDb}:`;
     }
     
-    addHistoryEntry('input', trimmedFullInputLine, currentPrompt);
+    addHistoryEntry('input', trimmedFullInputLine, currentPromptText);
+
+    if (awaitingPasswordForDb) {
+      const dbToAuth = awaitingPasswordForDb;
+      const password = trimmedFullInputLine;
+      setAwaitingPasswordForDb(null); // Clear password mode immediately
+
+      const authResult = handlePasswordAttempt(dbToAuth, password, databases);
+      if (authResult.newCurrentDb) {
+        setCurrentDatabase(authResult.newCurrentDb);
+      }
+      addHistoryEntry(authResult.output.startsWith('Error:') ? 'error' : 'output', authResult.output);
+      return; // Password attempt processed, no further command processing on this line.
+    }
+    
+    if (trimmedFullInputLine.startsWith('--')) {
+      addHistoryEntry('comment', trimmedFullInputLine, currentPromptText);
+      return;
+    }
 
     const individualCommandStrings = trimmedFullInputLine
       .split(';')
@@ -167,7 +184,7 @@ export function SqlCliComponent() {
       if (isLoadingAssistant || isSavingData) continue; 
 
       const { commandName, args } = parseCommand(commandStr);
-      let result: { newDatabases?: DatabasesStructure; newCurrentDb?: string | null; output: string | string[] };
+      let result: any; // Using 'any' for result due to varying return types
       let needsSave = false;
 
       if (commandStr.toUpperCase().startsWith('ASSIST ')) {
@@ -193,9 +210,8 @@ export function SqlCliComponent() {
       
       switch (commandName) {
         case 'CREATE':
-          if (args[0]?.toUpperCase() === 'DATABASE' && args[1]) {
-            const dbName = args[1].replace(/;/g, '');
-            result = handleCreateDatabase(dbName, tempDatabases);
+          if (args[0]?.toUpperCase() === 'DATABASE') {
+            result = handleCreateDatabase(commandStr, tempDatabases); // Pass full command
             if (result.newDatabases) {
               tempDatabases = result.newDatabases;
               needsSave = !result.output.startsWith('Error:');
@@ -209,7 +225,7 @@ export function SqlCliComponent() {
              }
              addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
           } else {
-            addHistoryEntry('error', `Error: Unknown CREATE command in '${commandStr}'. Try CREATE DATABASE <name>; or CREATE TABLE <name> (...);`);
+            addHistoryEntry('error', `Error: Unknown CREATE command in '${commandStr}'. Try CREATE DATABASE <name> [WITH PASSWORD '<password>']; or CREATE TABLE <name> (...);`);
           }
           break;
         case 'SHOW':
@@ -226,10 +242,14 @@ export function SqlCliComponent() {
           if (args[0]) {
             const dbName = args[0].replace(/;/g, '');
             result = handleUseDatabase(dbName, tempDatabases); 
-            if (result.newCurrentDb !== undefined && !result.output.startsWith('Error:')) {
+            if (result.requiresPasswordInput && result.dbToAuth) {
+              setAwaitingPasswordForDb(result.dbToAuth);
+              addHistoryEntry('output', result.output);
+              return; // Stop processing further commands on this line, wait for password
+            } else if (result.newCurrentDb !== undefined && !(typeof result.output === 'string' && result.output.startsWith('Error:'))) {
               setCurrentDatabase(result.newCurrentDb); 
             }
-            addHistoryEntry(result.output.startsWith('Error:') ? 'error' : 'output', result.output);
+            addHistoryEntry((typeof result.output === 'string' && result.output.startsWith('Error:')) ? 'error' : 'output', result.output);
           } else {
             addHistoryEntry('error', `Error: Missing database name for USE command in '${commandStr}'.`);
           }
@@ -333,16 +353,16 @@ export function SqlCliComponent() {
         case 'EXIT':
           setHistory([]);
           setCurrentDatabase(null);
+          setAwaitingPasswordForDb(null);
           addHistoryEntry('output', "Goodbye!");
-          // Optionally, you could add a small delay then the welcome messages if you want it to "reset" rather than just close.
-          // setTimeout(() => addHistoryEntry('output', initialWelcomeMessages), 50);
+          setTimeout(() => addHistoryEntry('output', initialWelcomeMessages), 50);
           break;
         case 'HELP':
           addHistoryEntry('output', [
             "Available Commands:",
-            "  CREATE DATABASE <db_name>;",
+            "  CREATE DATABASE <db_name> [WITH PASSWORD '<password>'];",
             "  SHOW DATABASES;",
-            "  USE <db_name>;",
+            "  USE <db_name>; (If password protected, enter password on next line)",
             "  DROP DATABASE <db_name>;",
             "  CREATE TABLE <table_name> (col1_def, col2_def, ...);",
             "    Example: CREATE TABLE users (id INT, name VARCHAR(100));",
@@ -377,8 +397,8 @@ export function SqlCliComponent() {
         await saveDatabasesToServer(tempDatabases);
       }
     }
-    if (JSON.stringify(databases) !== JSON.stringify(tempDatabases)) {
-        setDatabases(tempDatabases); // Ensure client state reflects the final state if no save was triggered for the last command
+    if (JSON.stringify(databases) !== JSON.stringify(tempDatabases) && !awaitingPasswordForDb) {
+        setDatabases(tempDatabases); 
     }
   };
 
@@ -389,9 +409,16 @@ export function SqlCliComponent() {
     setInputValue('');
   };
 
+  const getPromptText = () => {
+    if (awaitingPasswordForDb) {
+      return `Password for ${awaitingPasswordForDb}:`;
+    }
+    return currentDatabase ? `${currentDatabase}>` : 'sql-cliq>';
+  };
+
   if (!isMounted || isLoadingInitialData) {
     return (
-      <div className="flex flex-col h-full items-center justify-center bg-transparent p-4 overflow-hidden">
+      <div className="flex flex-col h-full items-center justify-center bg-background p-4 overflow-hidden">
         <Terminal className="h-16 w-16 text-accent animate-pulse" />
         <p className="text-foreground mt-4">
           {isLoadingInitialData ? "Loading database from server..." : "Initializing SQL Cliq..."}
@@ -401,7 +428,7 @@ export function SqlCliComponent() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-transparent text-foreground font-mono overflow-hidden" onClick={() => inputRef.current?.focus()}>
+    <div className="flex flex-col h-full bg-background text-foreground font-mono overflow-hidden" onClick={() => inputRef.current?.focus()}>
       <header className="p-2 md:p-4 flex items-center gap-2 flex-shrink-0 bg-background border-b border-border sticky top-0 z-10">
         <Terminal className="h-6 w-6 text-accent" />
         <h1 className="text-xl font-semibold text-foreground">SQL Cliq</h1>
@@ -454,15 +481,15 @@ export function SqlCliComponent() {
 
       <form onSubmit={handleSubmit} className="p-2 md:p-4 flex items-center gap-2 flex-shrink-0 bg-background border-t border-border">
         <span className="text-accent text-sm md:text-base">
-          {currentDatabase ? `${currentDatabase}>` : 'sql-cliq>'}
+          {getPromptText()}
         </span>
         <Input
           ref={inputRef}
-          type="text"
+          type={awaitingPasswordForDb ? "password" : "text"}
           value={inputValue}
           onChange={e => setInputValue(e.target.value)}
           className="flex-grow bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 h-auto text-sm md:text-base text-foreground placeholder:text-muted-foreground"
-          placeholder="Type SQL command or HELP; ..."
+          placeholder={awaitingPasswordForDb ? "Enter password..." : "Type SQL command or HELP; ..."}
           spellCheck="false"
           autoComplete="off"
           disabled={isLoadingAssistant || isSavingData || isLoadingInitialData}
@@ -475,5 +502,3 @@ export function SqlCliComponent() {
     </div>
   );
 }
-
-    

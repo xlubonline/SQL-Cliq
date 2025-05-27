@@ -12,6 +12,7 @@ export interface TableSchema {
 
 export interface DatabaseSchema {
   tables: Record<string, TableSchema>;
+  passwordHash?: string; // Optional: SHA256 hash of the database password
 }
 
 export interface DatabasesStructure {

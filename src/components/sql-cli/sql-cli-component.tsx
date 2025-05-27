@@ -450,21 +450,24 @@ export function SqlCliComponent() {
                 entry.type === 'error' ? 'text-destructive' 
                 : entry.type === 'assist-output' ? 'text-accent' 
                 : entry.type === 'comment' ? 'text-muted-foreground/80'
-                : 'text-foreground/90'
+                : 'text-foreground/90' // Covers 'output' and 'assist-input'
             }`}>
-              {(entry.type === 'input' || entry.type === 'comment') && (
+              {entry.type === 'input' || entry.type === 'comment' ? (
                 <div className="flex">
                   <span className="text-accent mr-1">{entry.prompt}</span>
                   <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>
                 </div>
-              )}
-              {(entry.type === 'output' || entry.type === 'error' || entry.type === 'assist-input' || entry.type === 'assist-output') && 
-               entry.type !== 'comment' &&
-              (
+              ) : entry.type === 'output' || entry.type === 'error' ? (
+                // Apply ">> " prefix for output and error types
+                Array.isArray(entry.content) ? 
+                  entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{`>> ${line}`}</pre>) :
+                  <pre className="whitespace-pre-wrap break-words">{`>> ${entry.content}`}</pre>
+              ) : (entry.type === 'assist-input' || entry.type === 'assist-output') ? (
+                // Render assist types without ">> " prefix
                 Array.isArray(entry.content) ? 
                   entry.content.map((line, idx) => <pre key={idx} className="whitespace-pre-wrap break-words">{line}</pre>) :
-                  <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>              
-              )}
+                  <pre className="whitespace-pre-wrap break-words">{entry.content}</pre>
+              ) : null}
             </div>
           ))}
            {isLoadingAssistant && (

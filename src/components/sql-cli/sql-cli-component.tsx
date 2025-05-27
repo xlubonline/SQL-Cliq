@@ -51,6 +51,13 @@ export function SqlCliComponent() {
     setHistory(prev => [...prev, { id: Date.now().toString() + Math.random(), type, content, prompt: currentPrompt }]);
   }, []);
 
+  const initialWelcomeMessages = [
+    "Welcome to SQL Cliq!",
+    "Type 'ASSIST \"your question\"' for AI help.",
+    "Type 'HELP;' for a list of basic commands.",
+    "Database data is now saved on the server (simulated).",
+  ];
+
 
   useEffect(() => {
     setIsMounted(true);
@@ -58,18 +65,20 @@ export function SqlCliComponent() {
     try {
       const savedHistory = localStorage.getItem(SQL_CLIQ_HISTORY_KEY);
       if (savedHistory) {
-        setHistory(JSON.parse(savedHistory));
+        const parsedHistory = JSON.parse(savedHistory);
+        // Ensure history isn't empty after parsing, could happen if localStorage has "[]"
+        if (parsedHistory.length > 0) {
+            setHistory(parsedHistory);
+        } else {
+            addHistoryEntry('output', initialWelcomeMessages);
+        }
       } else {
-        addHistoryEntry('output', [
-          "Welcome to SQL Cliq!",
-          "Type 'ASSIST \"your question\"' for AI help.",
-          "Type 'HELP;' for a list of basic commands.",
-          "Database data is now saved on the server (simulated).",
-        ]);
+        addHistoryEntry('output', initialWelcomeMessages);
       }
     } catch (error) {
       console.error("Failed to load history from localStorage:", error);
       addHistoryEntry('error', "Error loading command history.");
+      addHistoryEntry('output', initialWelcomeMessages);
     }
 
     try {
@@ -318,12 +327,15 @@ export function SqlCliComponent() {
           break;
         case 'CLEAR':
           setHistory([]);
-           addHistoryEntry('output', [ 
-            "Terminal cleared.",
-            "Welcome to SQL Cliq!",
-            "Type 'ASSIST \"your question\"' for AI help.",
-            "Type 'HELP;' for a list of basic commands.",
-           ]);
+           addHistoryEntry('output', ["Terminal cleared."]);
+           addHistoryEntry('output', initialWelcomeMessages);
+          break;
+        case 'EXIT':
+          setHistory([]);
+          setCurrentDatabase(null);
+          addHistoryEntry('output', "Goodbye!");
+          // Optionally, you could add a small delay then the welcome messages if you want it to "reset" rather than just close.
+          // setTimeout(() => addHistoryEntry('output', initialWelcomeMessages), 50);
           break;
         case 'HELP':
           addHistoryEntry('output', [
@@ -346,7 +358,8 @@ export function SqlCliComponent() {
             "  UPDATE <table_name> SET col1 = val1, ... [WHERE condition];",
             "  DELETE FROM <table_name> [WHERE condition];",
             "  ASSIST \"<your_sql_question>\"; -- Get AI syntax help",
-            "  CLEAR; -- Clear the terminal",
+            "  CLEAR; -- Clear the terminal screen",
+            "  EXIT; -- Clear screen, reset current database, and show goodbye message",
             "  HELP; -- Show this help message",
             "  -- <your_comment> -- Add a comment (ignored by SQL engine)",
             "Note: Multiple commands can be entered on one line, separated by semicolons.",
@@ -378,7 +391,7 @@ export function SqlCliComponent() {
 
   if (!isMounted || isLoadingInitialData) {
     return (
-      <div className="flex flex-col h-full items-center justify-center bg-background p-4">
+      <div className="flex flex-col h-full items-center justify-center bg-transparent p-4 overflow-hidden">
         <Terminal className="h-16 w-16 text-accent animate-pulse" />
         <p className="text-foreground mt-4">
           {isLoadingInitialData ? "Loading database from server..." : "Initializing SQL Cliq..."}
@@ -388,8 +401,8 @@ export function SqlCliComponent() {
   }
 
   return (
-    <div className="flex flex-col h-full bg-background text-foreground p-2 md:p-4 font-mono" onClick={() => inputRef.current?.focus()}>
-      <header className="mb-2 md:mb-4 flex items-center gap-2">
+    <div className="flex flex-col h-full bg-transparent text-foreground font-mono overflow-hidden" onClick={() => inputRef.current?.focus()}>
+      <header className="p-2 md:p-4 flex items-center gap-2 flex-shrink-0 bg-background border-b border-border sticky top-0 z-10">
         <Terminal className="h-6 w-6 text-accent" />
         <h1 className="text-xl font-semibold text-foreground">SQL Cliq</h1>
         {isSavingData && (
@@ -403,8 +416,8 @@ export function SqlCliComponent() {
         )}
       </header>
       
-      <ScrollArea className="flex-grow w-full bg-input/30 rounded-md p-3 md:p-4 shadow-inner" ref={scrollAreaRef}>
-        <div className="text-sm md:text-base">
+      <ScrollArea className="flex-grow w-full bg-input/30 shadow-inner min-h-0" ref={scrollAreaRef}>
+        <div className="text-sm md:text-base p-3 md:p-4">
           {history.map(entry => (
             <div key={entry.id} className={`mb-1.5 ${
                 entry.type === 'error' ? 'text-destructive' 
@@ -439,7 +452,7 @@ export function SqlCliComponent() {
         </div>
       </ScrollArea>
 
-      <form onSubmit={handleSubmit} className="mt-2 md:mt-4 flex items-center gap-2">
+      <form onSubmit={handleSubmit} className="p-2 md:p-4 flex items-center gap-2 flex-shrink-0 bg-background border-t border-border">
         <span className="text-accent text-sm md:text-base">
           {currentDatabase ? `${currentDatabase}>` : 'sql-cliq>'}
         </span>
@@ -462,3 +475,5 @@ export function SqlCliComponent() {
     </div>
   );
 }
+
+    

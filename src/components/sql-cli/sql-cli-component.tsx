@@ -523,10 +523,10 @@ export function SqlCliComponent() {
           className="flex-grow bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 h-auto text-sm md:text-base text-foreground placeholder:text-muted-foreground"
           placeholder={
             awaitingPasswordForDropDb 
-              ? "Enter password to confirm drop..." 
+              ? " Enter password to confirm drop..." 
               : awaitingPasswordForDb 
-                ? "Enter password..." 
-                : "Type SQL command or HELP; ..."
+                ? " Enter password..." 
+                : " Type SQL command or HELP; ..."
           }
           spellCheck="false"
           autoComplete="off"

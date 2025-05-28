@@ -33,7 +33,7 @@
 
     --ring: 120 100% 55%; /* Slightly lighter green for focus rings */
 
-    --radius: 0.2rem; /* Sharper corners */
+    --radius: 1rem; /* Sharper corners */
 
     --chart-1: 120 70% 60%;
     --chart-2: 150 60% 50%;
